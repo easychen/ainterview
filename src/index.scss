@@ -1,0 +1,25 @@
+@layer { @tailwind base; }
+@tailwind components;
+@tailwind utilities;
+
+.container-cg
+{
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.header-cg
+{
+  @apply sticky top-0 w-full  h-[4rem] flex flex-row items-center shadow mb-8 border-b z-50 bg-white bg-opacity-60 backdrop-blur;
+}
+
+::-webkit-scrollbar-thumb{ 
+  background-color: rgba($color: #666, $alpha: .5);
+  border-radius:3px;
+} 
+
+::-webkit-scrollbar
+{ 
+  width: 3px;
+  height: 3px;
+}
