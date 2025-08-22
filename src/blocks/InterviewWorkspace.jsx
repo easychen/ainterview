@@ -35,22 +35,17 @@ export function InterviewWorkspace() {
   
   // 初始化时检查API配置和会话数据
   useEffect(() => {
-    // 加载API配置
-    const apiLoaded = loadApiConfig();
-    
     // 加载会话数据
-    const sessionLoaded = loadSessionData();
+    loadSessionData();
     
-    // 根据加载的数据决定当前步骤
-    if (apiLoaded && apiState.isConfigured) {
-      if (sessionLoaded) {
-        // 如果有保存的会话数据，根据数据决定步骤
-        // 这里的逻辑将在状态加载时自动设置
-      } else {
-        updateInterviewState({ currentStep: 'content-input' });
-      }
+    // API配置会在store初始化时自动加载
+    // 根据API配置状态设置当前步骤
+    if (apiState.isConfigured) {
+      updateInterviewState({ currentStep: 'content-input' });
+    } else {
+      updateInterviewState({ currentStep: 'api-config' });
     }
-  }, []);
+  }, [apiState.isConfigured, loadSessionData, updateInterviewState]);
   
   // 获取当前步骤索引
   const getStepIndex = () => {

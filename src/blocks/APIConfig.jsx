@@ -49,6 +49,11 @@ export function APIConfig() {
       ]
     },
     { 
+      label: 'DeepSeek', 
+      value: 'https://api.deepseek.com/v1',
+      models: ['deepseek-chat']
+    },
+    { 
       label: 'OpenAI', 
       value: 'https://api.openai.com/v1',
       models: ['gpt-3.5-turbo', 'gpt-4', 'gpt-4-turbo-preview', 'gpt-4o']
@@ -81,26 +86,33 @@ export function APIConfig() {
   
   useEffect(() => {
     // 尝试加载已保存的配置
-    const loaded = loadApiConfig();
-    if (loaded) {
-      const config = APIConfigManager.loadConfig();
-      if (config) {
-        setForm({
-          apiKey: config.apiKey || '',
-          baseUrl: config.baseUrl || 'https://api.siliconflow.cn/v1',
-          model: config.model || 'qwen/Qwen2.5-7B-Instruct'
-        });
-        setSelectedProvider(config.baseUrl || 'https://api.siliconflow.cn/v1');
-        
-        // 检查是否是自定义模型
-        const provider = apiProviders.find(p => p.value === config.baseUrl);
-        if (provider && !provider.models.includes(config.model)) {
-          setIsCustomModel(true);
-          setCustomModel(config.model);
-        }
+    const config = APIConfigManager.loadConfig();
+    if (config && config.apiKey) {
+      // 更新状态存储
+      updateApiState({
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl || 'https://api.siliconflow.cn/v1',
+        model: config.model || 'qwen/Qwen2.5-7B-Instruct',
+        isConfigured: config.isValid === true,
+        lastValidated: config.lastValidated
+      });
+      
+      // 更新表单
+      setForm({
+        apiKey: config.apiKey,
+        baseUrl: config.baseUrl || 'https://api.siliconflow.cn/v1',
+        model: config.model || 'qwen/Qwen2.5-7B-Instruct'
+      });
+      setSelectedProvider(config.baseUrl || 'https://api.siliconflow.cn/v1');
+      
+      // 检查是否是自定义模型
+      const provider = apiProviders.find(p => p.value === config.baseUrl);
+      if (provider && !provider.models.includes(config.model)) {
+        setIsCustomModel(true);
+        setCustomModel(config.model);
       }
     }
-  }, [loadApiConfig]);
+  }, [updateApiState]);
   
   // 当选择API服务商时更新相关配置
   useEffect(() => {

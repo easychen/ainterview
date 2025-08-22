@@ -2,9 +2,21 @@ import { create } from 'zustand';
 import { APIConfigManager } from '../../lib/apiConfig.js';
 import { AIAPIClient } from '../../lib/aiClient.js';
 
-export const useInterviewStore = create((set, get) => ({
-  // API配置状态
-  apiState: {
+// 初始化时自动加载保存的配置
+const initializeConfig = () => {
+  const config = APIConfigManager.loadConfig();
+  if (config && config.apiKey) {
+    return {
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl || 'https://api.siliconflow.cn/v1',
+      model: config.model || 'qwen/Qwen2.5-7B-Instruct',
+      isConfigured: config.isValid === true,
+      isValidating: false,
+      lastValidated: config.lastValidated,
+      error: null,
+    };
+  }
+  return {
     apiKey: null,
     baseUrl: 'https://api.siliconflow.cn/v1',
     model: 'qwen/Qwen2.5-7B-Instruct',
@@ -12,11 +24,16 @@ export const useInterviewStore = create((set, get) => ({
     isValidating: false,
     lastValidated: null,
     error: null,
-  },
+  };
+};
+
+export const useInterviewStore = create((set, get) => ({
+  // API配置状态
+  apiState: initializeConfig(),
   
   // 访谈流程状态
   interviewState: {
-    currentStep: 'api-config', // api-config | content-input | analyzing | interviewing | completed
+    currentStep: initializeConfig().isConfigured ? 'content-input' : 'api-config',
     sessionId: null,
     createdAt: null,
   },
@@ -553,4 +570,4 @@ export const useInterviewStore = create((set, get) => ({
       console.error('清除会话数据失败:', error);
     }
   },
-}))
+}));
