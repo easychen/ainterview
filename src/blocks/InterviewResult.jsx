@@ -8,13 +8,14 @@ import {
   Button,
   Badge,
   Alert,
-  LoadingOverlay,
   Textarea,
   Select,
   ActionIcon,
   Tooltip,
+  Modal,
+  Progress,
   Divider,
-  CopyButton
+  Tabs
 } from '@mantine/core';
 import { 
   IconDownload,
@@ -25,9 +26,11 @@ import {
   IconFileText,
   IconMarkdown,
   IconAlertCircle,
-  IconShare,
+  IconEye,
   IconEdit,
-  IconClock
+  IconArrowRight,
+  IconBolt,
+  IconSettings
 } from '@tabler/icons-react';
 import ReactMarkdown from 'react-markdown';
 import { format } from 'date-fns';
@@ -39,18 +42,36 @@ export function InterviewResult() {
     resultState, 
     sessionState,
     contentState,
-    generateInterviewScriptStream,
+    // 提纲生成
+    generateInterviewOutline,
+    generateInterviewOutlineStream,
+    // 章节生成
+    generateSectionContent,
+    generateSectionContentStream,
+    generateAllSections,
+    // 初稿合并
+    generateDraftScript,
+    // 风格润色
+    generateFinalScript,
+    generateFinalScriptStream,
+    // 快速模式
     generateInterviewScriptWithStyle,
-    switchInterviewStyle,
+    switchGenerationMode,
+    // 统一管理
     updateResultState,
     resetInterview
   } = useInterviewStore();
-  
-  const [isEditing, setIsEditing] = useState(false);
-  const [editedScript, setEditedScript] = useState('');
+
   const [exportFormat, setExportFormat] = useState('markdown');
   const [selectedStyle, setSelectedStyle] = useState('default');
-  
+  const [currentStep, setCurrentStep] = useState(1); // 1:提纲 2:章节 3:初稿 4:润色
+  const [sectionProgress, setSectionProgress] = useState({ current: 0, total: 0 });
+  const [isGeneratingAll, setIsGeneratingAll] = useState(false);
+  const [selectedSectionIndex, setSelectedSectionIndex] = useState(null); // 用于预览章节
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [activeMode, setActiveMode] = useState(resultState.generationMode || 'outline'); // 'outline' | 'quick'
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false); // 重置确认框
+
   // 写作风格选项
   const styleOptions = [
     { value: 'default', label: '默认风格', description: '亲和生动，深度人物特稿' },
@@ -60,227 +81,402 @@ export function InterviewResult() {
     { value: 'literary', label: '文学风格', description: '文学性强，诗意优美，哲理思辨' },
     { value: 'business', label: '商业风格', description: '数据驱动，分析深入，实操性强' }
   ];
-  
-  // 初始化时生成访谈稿
-  useEffect(() => {
-    if (!resultState.interviewScripts[resultState.currentStyle] && !resultState.isGenerating) {
-      handleGenerateScript(resultState.currentStyle);
-    }
-  }, []);
-  
-  // 当访谈稿或流式访谈稿生成后，设置编辑内容
-  useEffect(() => {
-    const currentScript = resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript;
-    if (currentScript) {
-      setEditedScript(currentScript.content);
-      // 更新选中的风格
-      if (currentScript.style) {
-        setSelectedStyle(currentScript.style);
-      }
-    } else if (resultState.streamingScript) {
-      setEditedScript(resultState.streamingScript.content);
-      if (resultState.streamingScript.style) {
-        setSelectedStyle(resultState.streamingScript.style);
-      }
-    }
-  }, [resultState.interviewScripts, resultState.currentStyle, resultState.interviewScript, resultState.streamingScript]);
-  
-  // 生成访谈稿（使用流式输出和风格选择）
-  const handleGenerateScript = async (style = selectedStyle) => {
+
+  // 第一步：生成提纲
+  const handleGenerateOutline = async () => {
     try {
+      await generateInterviewOutlineStream('default', (chunk, fullContent) => {
+        // 实时更新显示
+      });
+      setCurrentStep(2);
+    } catch (error) {
+      console.error('Failed to generate outline:', error);
+    }
+  };
+  
+  // 第二步：生成单个章节
+  const handleGenerateSection = async (sectionIndex) => {
+    try {
+      await generateSectionContentStream(sectionIndex, (chunk, fullContent, index) => {
+        // 实时更新显示
+      });
+    } catch (error) {
+      console.error(`Failed to generate section ${sectionIndex}:`, error);
+    }
+  };
+  
+  // 第二步：生成所有章节
+  const handleGenerateAllSections = async () => {
+    try {
+      setIsGeneratingAll(true);
+      setSectionProgress({ current: 0, total: resultState.outline?.outline?.length || 0 });
+      
+      await generateAllSections((current, total) => {
+        setSectionProgress({ current, total });
+      });
+      
+      setCurrentStep(3);
+    } catch (error) {
+      console.error('Failed to generate all sections:', error);
+    } finally {
+      setIsGeneratingAll(false);
+      setSectionProgress({ current: 0, total: 0 });
+    }
+  };
+  
+  // 第三步：合并初稿
+  const handleGenerateDraft = () => {
+    try {
+      const draft = generateDraftScript();
+      if (draft) {
+        setCurrentStep(4);
+      }
+    } catch (error) {
+      console.error('Failed to generate draft:', error);
+    }
+  };
+  
+  // 第四步：风格润色
+  const handleGenerateFinal = async (style = selectedStyle) => {
+    try {
+      setSelectedStyle(style);
+      await generateFinalScriptStream(style, (chunk, fullContent, currentStyle) => {
+        // 实时更新显示
+      });
+    } catch (error) {
+      console.error('Failed to generate final script:', error);
+    }
+  };
+  
+  // 快速模式：直接生成访谈稿
+  const handleQuickGenerate = async (style = selectedStyle) => {
+    try {
+      setSelectedStyle(style);
+      // 确保切换到快速模式tab
+      if (activeMode !== 'quick') {
+        setActiveMode('quick');
+        switchGenerationMode('quick');
+      }
       await generateInterviewScriptWithStyle(style);
     } catch (error) {
-      console.error('Failed to generate interview script:', error);
+      console.error('Failed to generate quick script:', error);
     }
   };
   
-  // 切换风格（智能切换：已生成则显示，未生成则生成）
-  const handleStyleChange = async (newStyle) => {
-    try {
-      setSelectedStyle(newStyle);
-      await switchInterviewStyle(newStyle);
-    } catch (error) {
-      console.error('Failed to switch style:', error);
+  // 切换生成模式
+  const handleModeSwitch = (mode) => {
+    setActiveMode(mode);
+    // 快速模式传递'quick'，精细模式传递'outline'
+    const generationMode = mode === 'quick' ? 'quick' : 'outline';
+    switchGenerationMode(generationMode);
+    
+    // 重置相关状态
+    if (mode === 'quick') {
+      setCurrentStep(1); // 快速模式直接到风格选择
+    } else {
+      // 精细模式根据当前数据状态决定步骤
+      if (resultState.finalScripts && Object.keys(resultState.finalScripts).length > 0) {
+        setCurrentStep(4);
+      } else if (resultState.draftScript) {
+        setCurrentStep(4);
+      } else if (resultState.sections && Object.keys(resultState.sections).length > 0) {
+        setCurrentStep(3);
+      } else if (resultState.outline) {
+        setCurrentStep(2);
+      } else {
+        setCurrentStep(1);
+      }
     }
   };
   
-  // 保存编辑
-  const handleSaveEdit = () => {
-    const currentScript = resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript;
-    if (currentScript) {
-      const updatedScript = {
-        ...currentScript,
-        content: editedScript,
-        lastEditedAt: new Date().toISOString()
-      };
-      
-      // 更新多风格结构中的对应风格
-      updateResultState({ 
-        interviewScripts: {
-          ...resultState.interviewScripts,
-          [resultState.currentStyle]: updatedScript
-        },
-        interviewScript: updatedScript  // 保持兼容性
-      });
-    }
-    setIsEditing(false);
-  };
-  
-  // 取消编辑
-  const handleCancelEdit = () => {
-    const currentScript = resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript;
-    setEditedScript(currentScript?.content || '');
-    setIsEditing(false);
-  };
-  
-  // 导出文件
-  const handleExport = () => {
-    const currentScript = resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript;
-    if (!currentScript) return;
-    
-    const content = isEditing ? editedScript : currentScript.content;
-    const timestamp = format(new Date(), 'yyyy-MM-dd-HHmm', { locale: zhCN });
-    
-    let filename, mimeType;
-    
-    switch (exportFormat) {
-      case 'txt':
-        filename = `访谈稿-${timestamp}.txt`;
-        mimeType = 'text/plain';
-        break;
-      case 'html':
-        const htmlContent = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>访谈稿</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
-    h1, h2, h3 { color: #333; }
-    blockquote { border-left: 4px solid #ddd; margin: 1em 0; padding-left: 1em; color: #666; }
-    pre { background: #f5f5f5; padding: 1em; border-radius: 4px; overflow-x: auto; }
-  </style>
-</head>
-<body>
-${convertMarkdownToHtml(content)}
-</body>
-</html>`;
-        filename = `访谈稿-${timestamp}.html`;
-        mimeType = 'text/html';
-        downloadFile(htmlContent, filename, mimeType);
-        return;
-      default: // markdown
-        filename = `访谈稿-${timestamp}.md`;
-        mimeType = 'text/markdown';
-        break;
-    }
-    
-    downloadFile(content, filename, mimeType);
-  };
-  
-  // 下载文件
-  const downloadFile = (content, filename, mimeType) => {
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-  
-  // 导出原始问答记录
-  const handleExportQA = () => {
-    if (!sessionState.questions || sessionState.questions.length === 0) return;
-    
-    const timestamp = format(new Date(), 'yyyy-MM-dd-HHmm', { locale: zhCN });
-    
-    // 生成问答内容
-    const qaContent = sessionState.questions.map((q, index) => {
-      const answer = sessionState.answers[q.id]?.content || '（未回答）';
-      return `Q${index + 1}: ${q.content}\n\nA${index + 1}: ${answer}\n\n${'='.repeat(50)}\n`;
-    }).join('\n');
-    
-    const fullContent = `访谈问答记录\n生成时间：${format(new Date(), 'yyyy-MM-dd HH:mm:ss', { locale: zhCN })}\n总问题数：${sessionState.questions.length}\n已回答数：${Object.keys(sessionState.answers).length}\n\n${'='.repeat(80)}\n\n${qaContent}`;
-    
-    const filename = `访谈问答记录-${timestamp}.txt`;
-    downloadFile(fullContent, filename, 'text/plain');
-  };
-  
-  // 简单的Markdown转HTML（实际项目中可能需要更完善的转换）
-  const convertMarkdownToHtml = (markdown) => {
-    return markdown
-      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-      .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-      .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-      .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
-      .replace(/\*(.*)\*/gim, '<em>$1</em>')
-      .replace(/\n/gim, '<br>');
-  };
-  
-  // 开始新访谈
-  const handleNewInterview = () => {
+  // 处理重置访谈确认
+  const handleResetConfirm = () => {
     resetInterview();
+    setResetConfirmOpen(false);
   };
   
-  // 计算统计信息
-  const stats = {
-    totalQuestions: sessionState.questions.length,
-    totalAnswers: Object.keys(sessionState.answers).length,
-    wordCount: (resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript)?.wordCount || 0,
-    estimatedReadTime: (resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript)?.estimatedReadTime || 0
+  // 预览章节内容
+  const handlePreviewSection = (sectionIndex) => {
+    setSelectedSectionIndex(sectionIndex);
+    setPreviewModalOpen(true);
   };
   
+  // 关闭预览
+  const handleClosePreview = () => {
+    setSelectedSectionIndex(null);
+    setPreviewModalOpen(false);
+  };
+
+  // 初始化时判断当前应该在哪一步
+  useEffect(() => {
+    // 同步生成模式
+    const mode = resultState.generationMode || 'outline';
+    setActiveMode(mode);
+    
+    // 如果是快速模式，不需要设置步骤
+    if (mode === 'quick' || mode === 'full') {
+      return;
+    }
+    
+    // 精细模式的步骤判断
+    if (resultState.finalScripts && Object.keys(resultState.finalScripts).length > 0) {
+      setCurrentStep(4); // 已有最终稿
+    } else if (resultState.draftScript) {
+      setCurrentStep(4); // 有初稿，可以进行润色
+    } else if (resultState.sections && Object.keys(resultState.sections).length > 0) {
+      const totalSections = resultState.outline?.outline?.length || 0;
+      const completedSections = Object.keys(resultState.sections).length;
+      if (completedSections === totalSections && totalSections > 0) {
+        setCurrentStep(3); // 所有章节已完成，可以合并
+      } else {
+        setCurrentStep(2); // 部分章节已完成
+      }
+    } else if (resultState.outline) {
+      setCurrentStep(2); // 有提纲，可以生成章节
+    } else {
+      setCurrentStep(1); // 开始生成提纲
+      // 自动生成提纲
+      if (!resultState.isGeneratingOutline) {
+        handleGenerateOutline();
+      }
+    }
+  }, [resultState.generationMode]);
+
   return (
     <div style={{ position: 'relative' }}>
-      <LoadingOverlay visible={resultState.isGenerating} style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 9999 }} />
-      
-      {/* 头部信息 */}
+      {/* 模式选择 */}
       <Card withBorder padding="md" mb="md">
-        <Group position="apart" align="flex-start">
-          <div>
-            <Title order={2} mb="xs">访谈完成</Title>
-            <Text size="sm" color="dimmed">
-              AI 已根据您的问答内容生成了完整的访谈稿
-            </Text>
-          </div>
-          <Badge color="green" variant="light" size="lg">
-            已完成
-          </Badge>
-        </Group>
+        <Title order={2} mb="md">访谈稿生成流程</Title>
+        
+        <Tabs 
+          value={activeMode} 
+          onTabChange={handleModeSwitch}
+          mb="md"
+        >
+          <Tabs.List>
+            <Tabs.Tab value="quick" icon={<IconBolt size={16} />}>
+              快速模式
+            </Tabs.Tab>
+            <Tabs.Tab value="outline" icon={<IconSettings size={16} />}>
+              精细模式
+            </Tabs.Tab>
+          </Tabs.List>
+          
+          <Tabs.Panel value="quick" pt="sm">
+            <Alert color="blue" variant="light" mb="md">
+              <Text size="sm">
+                <strong>快速模式</strong>：问答记录 → 风格润色（约2-3分钟，适合快速出稿、保持原始对话风格）
+              </Text>
+            </Alert>
+          </Tabs.Panel>
+          
+          <Tabs.Panel value="outline" pt="sm">
+            <Alert color="green" variant="light" mb="md">
+              <Text size="sm">
+                <strong>精细模式</strong>：生成提纲 → 章节生成 → 合并初稿 → 风格润色（约5-10分钟，适合深度文章、结构化内容、丰富细节）
+              </Text>
+            </Alert>
+          </Tabs.Panel>
+        </Tabs>
+      </Card>
+      
+      {/* 流程步骤指示器 */}
+      {activeMode === 'outline' && (
+        <Card withBorder padding="md" mb="md">
+          <Title order={3} mb="md">精细模式流程</Title>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          {[
+            { step: 1, title: '生成提纲', desc: '分析内容生成文章结构' },
+            { step: 2, title: '章节写作', desc: '按提纲逐章节生成内容' },
+            { step: 3, title: '合并初稿', desc: '整合所有章节为完整初稿' },
+            { step: 4, title: '风格润色', desc: '按不同风格进行二次加工' }
+          ].map((item, index) => (
+            <div key={item.step} style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              flex: 1,
+              opacity: currentStep >= item.step ? 1 : 0.5
+            }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                backgroundColor: currentStep >= item.step ? '#228be6' : '#e9ecef',
+                color: currentStep >= item.step ? 'white' : '#868e96',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                marginRight: '12px'
+              }}>
+                {currentStep > item.step ? '✓' : item.step}
+              </div>
+              <div style={{ flex: 1 }}>
+                <Text weight={600} size="sm" color={currentStep >= item.step ? 'dark' : 'dimmed'}>
+                  {item.title}
+                </Text>
+                <Text size="xs" color="dimmed">
+                  {item.desc}
+                </Text>
+              </div>
+              {index < 3 && (
+                <div style={{
+                  width: '60px',
+                  height: '2px',
+                  backgroundColor: currentStep > item.step ? '#228be6' : '#e9ecef',
+                  margin: '0 16px'
+                }} />
+              )}
+            </div>
+          ))}
+        </div>
         
         {/* 统计信息 */}
-        <Group mt="md" spacing="xl">
+        <Group spacing="xl">
           <div>
             <Text size="xl" weight={700} color="blue">
-              {stats.totalQuestions}
+              {sessionState.questions?.length || 0}
             </Text>
-            <Text size="xs" color="dimmed">总问题数</Text>
+            <Text size="xs" color="dimmed">问题数</Text>
           </div>
           <div>
             <Text size="xl" weight={700} color="green">
-              {stats.totalAnswers}
+              {Object.keys(sessionState.answers || {}).length}
             </Text>
             <Text size="xs" color="dimmed">已回答</Text>
           </div>
-          <div>
-            <Text size="xl" weight={700} color="orange">
-              {stats.wordCount}
-            </Text>
-            <Text size="xs" color="dimmed">字数</Text>
-          </div>
-          <div>
-            <Text size="xl" weight={700} color="purple">
-              {stats.estimatedReadTime}
-            </Text>
-            <Text size="xs" color="dimmed">预计阅读时间(分钟)</Text>
-          </div>
+          {resultState.draftScript && (
+            <div>
+              <Text size="xl" weight={700} color="orange">
+                {resultState.draftScript.wordCount || 0}
+              </Text>
+              <Text size="xs" color="dimmed">初稿字数</Text>
+            </div>
+          )}
+          {resultState.finalScripts[selectedStyle] && (
+            <div>
+              <Text size="xl" weight={700} color="purple">
+                {resultState.finalScripts[selectedStyle].wordCount || 0}
+              </Text>
+              <Text size="xs" color="dimmed">最终字数</Text>
+            </div>
+          )}
         </Group>
-      </Card>
+        </Card>
+      )}
       
+      {/* 快速模式内容 */}
+      {activeMode === 'quick' && (
+        <Card withBorder padding="md" mb="md">
+          <Title order={3} mb="md">快速模式</Title>
+          <Group spacing="xl" mb="md">
+            <div>
+              <Text size="xl" weight={700} color="blue">
+                {sessionState.questions?.length || 0}
+              </Text>
+              <Text size="xs" color="dimmed">问题数</Text>
+            </div>
+            <div>
+              <Text size="xl" weight={700} color="green">
+                {Object.keys(sessionState.answers || {}).length}
+              </Text>
+              <Text size="xs" color="dimmed">已回答</Text>
+            </div>
+            {resultState.interviewScripts[selectedStyle] && (
+              <div>
+                <Text size="xl" weight={700} color="purple">
+                  {resultState.interviewScripts[selectedStyle].wordCount || 0}
+                </Text>
+                <Text size="xs" color="dimmed">访谈稿字数</Text>
+              </div>
+            )}
+          </Group>
+          
+          {/* 快速模式风格选择器 */}
+          <Card withBorder padding="sm" mb="md" style={{ backgroundColor: '#f8f9fa' }}>
+            <Title order={5} mb="sm">选择写作风格</Title>
+            <Group spacing="xs" mb="xs">
+              {styleOptions.map((style) => (
+                <Button
+                  key={style.value}
+                  variant={selectedStyle === style.value ? 'filled' : 'light'}
+                  size="sm"
+                  onClick={() => setSelectedStyle(style.value)}
+                >
+                  {style.label}
+                </Button>
+              ))}
+            </Group>
+            <Text size="xs" color="dimmed" mb="md">
+              当前风格：{styleOptions.find(s => s.value === selectedStyle)?.description || '默认风格'}
+            </Text>
+            
+            {/* 生成按钮 */}
+            <Group position="center">
+              <Button
+                size="md"
+                onClick={() => handleQuickGenerate(selectedStyle)}
+                loading={resultState.isGenerating}
+                leftIcon={<IconBolt size={16} />}
+                disabled={Object.keys(sessionState.answers || {}).length < 5}
+              >
+                生成访谈稿
+              </Button>
+            </Group>
+            
+            {Object.keys(sessionState.answers || {}).length < 5 && (
+              <Text size="xs" color="dimmed" align="center" mt="xs">
+                至少需要5个问题后才能生成访谈稿
+              </Text>
+            )}
+          </Card>
+          
+          {/* 流式生成的访谈稿 */}
+          {resultState.streamingScript && (
+            <Card withBorder padding="md" mb="md" style={{ backgroundColor: '#f0f9ff' }}>
+              <Text size="sm" weight={600} mb="xs">正在生成 {selectedStyle} 风格的访谈稿...</Text>
+              <div style={{ 
+                maxHeight: '400px', 
+                overflowY: 'auto',
+                fontSize: '14px',
+                lineHeight: '1.5'
+              }}>
+                <ReactMarkdown>
+                  {resultState.streamingScript.content}
+                </ReactMarkdown>
+              </div>
+            </Card>
+          )}
+          
+          {/* 最终访谈稿内容 */}
+          {resultState.interviewScripts[selectedStyle] && !resultState.streamingScript && (
+            <Card withBorder padding="md" mb="md">
+              <Group position="apart" mb="md">
+                <Text weight={600}>访谈稿（{selectedStyle} 风格）</Text>
+                <Group spacing="xs">
+                  <Text size="xs" color="dimmed">
+                    {resultState.interviewScripts[selectedStyle].wordCount} 字
+                  </Text>
+                </Group>
+              </Group>
+              
+              <div style={{ 
+                maxHeight: '500px', 
+                overflowY: 'auto', 
+                border: '1px solid #eee', 
+                borderRadius: '8px', 
+                padding: '16px',
+                backgroundColor: '#fafafa'
+              }}>
+                <ReactMarkdown>
+                  {resultState.interviewScripts[selectedStyle].content}
+                </ReactMarkdown>
+              </div>
+            </Card>
+          )}
+        </Card>
+      )}
+
       {/* 错误提示 */}
       {resultState.error && (
         <Alert 
@@ -293,186 +489,431 @@ ${convertMarkdownToHtml(content)}
           {resultState.error}
         </Alert>
       )}
-      
-      {/* 访谈稿内容 */}
-      {(resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript || resultState.streamingScript) && (
+
+      {/* 第一步：提纲生成 */}
+      {activeMode === 'outline' && currentStep >= 1 && (
         <Card shadow="sm" padding="xl" withBorder mb="md">
           <Group position="apart" mb="md">
             <Group spacing="xs">
-              <Title order={3}>访谈稿</Title>
-              {resultState.streamingScript && (
+              <Title order={3}>📋 第一步：文章提纲</Title>
+              {resultState.isGeneratingOutline && (
                 <Badge color="blue" variant="light" size="sm">
                   生成中...
                 </Badge>
               )}
-              {(resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript)?.style && (
-                <Badge color="indigo" variant="light" size="sm">
-                  {styleOptions.find(s => s.value === (resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript).style)?.label || '默认风格'}
+              {resultState.outline && (
+                <Badge color="green" variant="light" size="sm">
+                  ✓ 已完成
                 </Badge>
               )}
             </Group>
             <Group spacing="xs">
-              <CopyButton value={isEditing ? editedScript : ((resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript)?.content || resultState.streamingScript?.content || '')}>
-                {({ copied, copy }) => (
-                  <Tooltip label={copied ? '已复制' : '复制内容'}>
-                    <ActionIcon color={copied ? 'teal' : 'gray'} onClick={copy}>
-                      {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
-                    </ActionIcon>
-                  </Tooltip>
-                )}
-              </CopyButton>
-              
-              {!resultState.streamingScript && (
-                <>
-                  <Tooltip label="重新生成">
-                    <ActionIcon 
-                      variant="light" 
-                      onClick={() => handleGenerateScript()}
-                      loading={resultState.isGenerating}
-                    >
-                      <IconRefresh size={16} />
-                    </ActionIcon>
-                  </Tooltip>
-                  
-                  <Tooltip label={isEditing ? '保存编辑' : '编辑内容'}>
-                    <ActionIcon 
-                      variant="light" 
-                      color={isEditing ? 'green' : 'blue'}
-                      onClick={isEditing ? handleSaveEdit : () => setIsEditing(true)}
-                    >
-                      {isEditing ? <IconCheck size={16} /> : <IconEdit size={16} />}
-                    </ActionIcon>
-                  </Tooltip>
-                </>
-              )}
+              <Button 
+                size="sm"
+                variant="light"
+                onClick={handleGenerateOutline}
+                loading={resultState.isGeneratingOutline}
+                leftIcon={<IconRefresh size={14} />}
+              >
+                {resultState.outline ? '重新生成' : '生成提纲'}
+              </Button>
             </Group>
           </Group>
-          
-          {/* 写作风格选择器 */}
-          {!resultState.streamingScript && (
-            <Card withBorder padding="sm" mb="md" style={{ backgroundColor: '#f8f9fa' }}>
-              <Title order={5} mb="sm">写作风格</Title>
-              <Group spacing="xs" mb="xs">
-                {styleOptions.map((style) => (
-                  <Button
-                    key={style.value}
-                    variant={selectedStyle === style.value ? 'filled' : 'light'}
-                    size="xs"
-                    onClick={() => handleStyleChange(style.value)}
-                    loading={resultState.isGenerating && selectedStyle === style.value}
-                  >
-                    {style.label}
-                  </Button>
-                ))}
-              </Group>
-              <Text size="xs" color="dimmed">
-                当前风格：{styleOptions.find(s => s.value === selectedStyle)?.description || '默认风格'}
-              </Text>
-            </Card>
-          )}
-          
-          {isEditing ? (
-            <Stack spacing="md">
-              <Textarea
-                value={editedScript}
-                onChange={(e) => setEditedScript(e.target.value)}
-                minRows={20}
-                maxRows={30}
-                autosize
-                placeholder="编辑访谈稿内容..."
-              />
-              <Group position="right">
-                <Button variant="subtle" onClick={handleCancelEdit}>
-                  取消
-                </Button>
-                <Button onClick={handleSaveEdit}>
-                  保存
-                </Button>
-              </Group>
-            </Stack>
-          ) : (
-            <div style={{ 
-              maxHeight: '600px', 
-              overflowY: 'auto', 
-              border: '1px solid #eee', 
-              borderRadius: '8px', 
+
+          {/* 流式生成的提纲内容 */}
+          {resultState.streamingOutline && (
+            <div style={{
               padding: '16px',
-              backgroundColor: '#fafafa'
+              backgroundColor: '#f0f9ff',
+              border: '1px solid #0ea5e9',
+              borderRadius: '8px',
+              marginBottom: '16px'
             }}>
-              <ReactMarkdown>
-                {resultState.streamingScript?.content || (resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript)?.content || ''}
-              </ReactMarkdown>
+              <Text size="sm" weight={600} mb="xs">实时生成中...</Text>
+              <div style={{ fontSize: '14px', lineHeight: '1.5' }}>
+                {resultState.streamingOutline}
+              </div>
             </div>
           )}
-          
-          {((resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript)?.generatedAt || resultState.streamingScript?.generatedAt) && (
-            <Text size="xs" color="dimmed" mt="md" align="right">
-              生成时间: {format(new Date(((resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript) || resultState.streamingScript).generatedAt), 'yyyy-MM-dd HH:mm:ss', { locale: zhCN })}
-              {(resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript)?.lastEditedAt && (
-                <> · 最后编辑: {format(new Date((resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript).lastEditedAt), 'yyyy-MM-dd HH:mm:ss', { locale: zhCN })}</>
+
+          {/* 生成完成的提纲 */}
+          {resultState.outline && (
+            <div>
+              <Text weight={600} mb="sm">
+                标题：{resultState.outline.title}
+              </Text>
+              <Group spacing="md" mb="md">
+                <Badge variant="outline">
+                  {resultState.outline.totalSections || resultState.outline.outline?.length || 0} 个章节
+                </Badge>
+                <Badge variant="outline">
+                  预计 {resultState.outline.estimatedWords || 0} 字
+                </Badge>
+              </Group>
+              
+              {currentStep >= 2 && (
+                <Group spacing="md">
+                  <Button
+                    size="sm"
+                    onClick={handleGenerateAllSections}
+                    loading={isGeneratingAll}
+                    leftIcon={<IconArrowRight size={14} />}
+                  >
+                    开始生成章节
+                  </Button>
+                </Group>
               )}
-            </Text>
+            </div>
           )}
         </Card>
       )}
-      
-      {/* 导出选项 */}
-      <Card withBorder padding="md" mb="md">
-        <Title order={4} mb="md">导出访谈内容</Title>
-        <Stack spacing="md">
-          <Group spacing="md" align="flex-end">
-            <Select
-              label="访谈稿导出格式"
-              value={exportFormat}
-              onChange={setExportFormat}
-              data={[
-                { value: 'markdown', label: 'Markdown (.md)', icon: IconMarkdown },
-                { value: 'txt', label: '纯文本 (.txt)', icon: IconFileText },
-                { value: 'html', label: 'HTML (.html)', icon: IconFile }
-              ]}
-              style={{ minWidth: 200 }}
-            />
-            <Button 
-              leftIcon={<IconDownload size={16} />}
-              onClick={handleExport}
-              disabled={!(resultState.interviewScripts[resultState.currentStyle] || resultState.interviewScript)}
-            >
-              下载访谈稿
-            </Button>
+
+      {/* 第二步：章节生成 */}
+      {activeMode === 'outline' && currentStep >= 2 && resultState.outline && (
+        <Card shadow="sm" padding="xl" withBorder mb="md">
+          <Group position="apart" mb="md">
+            <Group spacing="xs">
+              <Title order={3}>✍️ 第二步：章节写作</Title>
+              <Badge color={Object.keys(resultState.sections || {}).length === (resultState.outline?.outline?.length || 0) ? 'green' : 'blue'} variant="light" size="sm">
+                {Object.keys(resultState.sections || {}).length} / {resultState.outline?.outline?.length || 0} 已完成
+              </Badge>
+            </Group>
+            <Group spacing="xs">
+              <Button 
+                size="sm"
+                variant="light"
+                onClick={handleGenerateAllSections}
+                loading={isGeneratingAll}
+                leftIcon={<IconEdit size={14} />}
+              >
+                生成全部章节
+              </Button>
+            </Group>
           </Group>
-          
-          <Group spacing="md">
-            <Text size="sm" color="dimmed">
-              或者导出原始问答记录：
+
+          {/* 生成进度 */}
+          {isGeneratingAll && sectionProgress.total > 0 && (
+            <div style={{ marginBottom: '16px' }}>
+              <Text size="sm" mb="xs">
+                生成进度: {sectionProgress.current} / {sectionProgress.total}
+              </Text>
+              <Progress 
+                value={(sectionProgress.current / sectionProgress.total) * 100} 
+                color="blue"
+                style={{ height: '8px' }}
+              />
+            </div>
+          )}
+
+          {/* 章节列表 */}
+          <Stack spacing="sm">
+            {resultState.outline.outline?.map((section, index) => {
+              const isGenerated = resultState.sections && resultState.sections[index];
+              const isGenerating = resultState.isGeneratingSection && resultState.currentSection === index;
+              const isStreaming = resultState.streamingSection?.index === index;
+              
+              return (
+                <Card key={index} withBorder padding="md" style={{
+                  backgroundColor: isGenerated ? '#f0f9ff' : isGenerating ? '#fef3c7' : '#fafafa',
+                  borderColor: isGenerated ? '#0ea5e9' : isGenerating ? '#f59e0b' : '#e5e7eb'
+                }}>
+                  <Group position="apart" align="flex-start">
+                    <div style={{ flex: 1 }}>
+                      <Group spacing="xs" mb="xs">
+                        <Badge 
+                          size="sm" 
+                          color={isGenerated ? 'blue' : isGenerating ? 'yellow' : 'gray'}
+                          variant="light"
+                        >
+                          第{section.sectionNumber}章
+                        </Badge>
+                        <Text weight={600} size="sm">
+                          {section.title}
+                        </Text>
+                        {isGenerated && (
+                          <Badge size="xs" color="green" variant="light">
+                            ✓ 已生成
+                          </Badge>
+                        )}
+                        {isGenerating && (
+                          <Badge size="xs" color="orange" variant="light">
+                            生成中...
+                          </Badge>
+                        )}
+                      </Group>
+                      
+                      <Text size="xs" color="dimmed" mb="xs">
+                        主题：{section.theme} | 预计{section.estimatedWords}字
+                      </Text>
+                      
+                      {/* 显示流式生成内容预览 */}
+                      {isStreaming && resultState.streamingSection?.content && (
+                        <div style={{
+                          marginTop: '8px',
+                          padding: '8px',
+                          backgroundColor: '#fffbeb',
+                          border: '1px solid #fbbf24',
+                          borderRadius: '4px',
+                          maxHeight: '120px',
+                          overflow: 'hidden',
+                          fontSize: '12px',
+                          lineHeight: '1.4'
+                        }}>
+                          {resultState.streamingSection.content.substring(0, 200)}...
+                        </div>
+                      )}
+                    </div>
+                    
+                    <Group spacing="xs">
+                      {isGenerated && (
+                        <Tooltip label="预览内容">
+                          <ActionIcon 
+                            size="sm"
+                            variant="light"
+                            color="blue"
+                            onClick={() => handlePreviewSection(index)}
+                          >
+                            <IconEye size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                      
+                      {!isGenerated && !isGenerating && (
+                        <Tooltip label="生成这一章">
+                          <ActionIcon 
+                            size="sm"
+                            variant="light"
+                            color="blue"
+                            onClick={() => handleGenerateSection(index)}
+                            disabled={resultState.isGeneratingSection}
+                          >
+                            <IconEdit size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                      
+                      {isGenerated && (
+                        <Tooltip label="重新生成">
+                          <ActionIcon 
+                            size="sm"
+                            variant="light"
+                            color="orange"
+                            onClick={() => handleGenerateSection(index)}
+                            disabled={resultState.isGeneratingSection}
+                          >
+                            <IconRefresh size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                    </Group>
+                  </Group>
+                </Card>
+              );
+            })}
+          </Stack>
+
+          {/* 进入下一步 */}
+          {Object.keys(resultState.sections || {}).length === (resultState.outline?.outline?.length || 0) && 
+           Object.keys(resultState.sections || {}).length > 0 && currentStep < 3 && (
+            <Group position="center" mt="md">
+              <Button
+                onClick={() => setCurrentStep(3)}
+                leftIcon={<IconArrowRight size={16} />}
+              >
+                进入第三步：合并初稿
+              </Button>
+            </Group>
+          )}
+        </Card>
+      )}
+
+      {/* 第三步：合并初稿 */}
+      {activeMode === 'outline' && currentStep >= 3 && Object.keys(resultState.sections || {}).length > 0 && (
+        <Card shadow="sm" padding="xl" withBorder mb="md">
+          <Group position="apart" mb="md">
+            <Group spacing="xs">
+              <Title order={3}>📝 第三步：合并初稿</Title>
+              {resultState.draftScript && (
+                <Badge color="green" variant="light" size="sm">
+                  ✓ 已完成
+                </Badge>
+              )}
+            </Group>
+            <Group spacing="xs">
+              <Button 
+                size="sm"
+                onClick={handleGenerateDraft}
+                leftIcon={<IconFile size={14} />}
+                disabled={!!resultState.draftScript}
+              >
+                {resultState.draftScript ? '初稿已生成' : '合并为初稿'}
+              </Button>
+            </Group>
+          </Group>
+
+          {resultState.draftScript && (
+            <div>
+              <Text size="sm" color="dimmed" mb="sm">
+                初稿已生成，共 {resultState.draftScript.wordCount} 字，包含 {resultState.draftScript.sectionsCount} 个章节
+              </Text>
+              
+              {currentStep < 4 && (
+                <Group position="center">
+                  <Button
+                    onClick={() => setCurrentStep(4)}
+                    leftIcon={<IconArrowRight size={16} />}
+                  >
+                    进入第四步：风格润色
+                  </Button>
+                </Group>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* 第四步：风格润色 */}
+      {activeMode === 'outline' && currentStep >= 4 && resultState.draftScript && (
+        <Card shadow="sm" padding="xl" withBorder mb="md">
+          <Group position="apart" mb="md">
+            <Group spacing="xs">
+              <Title order={3}>🎨 第四步：风格润色</Title>
+              {resultState.isGeneratingFinal && (
+                <Badge color="blue" variant="light" size="sm">
+                  润色中...
+                </Badge>
+              )}
+              {resultState.finalScripts[selectedStyle] && (
+                <Badge color="green" variant="light" size="sm">
+                  ✓ 已完成
+                </Badge>
+              )}
+            </Group>
+          </Group>
+
+          {/* 风格选择器 */}
+          <Card withBorder padding="sm" mb="md" style={{ backgroundColor: '#f8f9fa' }}>
+            <Title order={5} mb="sm">选择写作风格</Title>
+            <Group spacing="xs" mb="xs">
+              {styleOptions.map((style) => (
+                <Button
+                  key={style.value}
+                  variant={selectedStyle === style.value ? 'filled' : 'light'}
+                  size="sm"
+                  onClick={() => handleGenerateFinal(style.value)}
+                  loading={resultState.isGeneratingFinal && selectedStyle === style.value}
+                >
+                  {style.label}
+                </Button>
+              ))}
+            </Group>
+            <Text size="xs" color="dimmed">
+              当前风格：{styleOptions.find(s => s.value === selectedStyle)?.description || '默认风格'}
             </Text>
-            <Button 
-              variant="outline"
-              size="sm"
-              leftIcon={<IconFileText size={14} />}
-              onClick={handleExportQA}
-              disabled={!sessionState.questions || sessionState.questions.length === 0}
-            >
-              导出问答记录
+          </Card>
+
+          {/* 流式生成的最终稿 */}
+          {resultState.streamingFinal && (
+            <Card withBorder padding="md" mb="md" style={{ backgroundColor: '#f0f9ff' }}>
+              <Text size="sm" weight={600} mb="xs">正在生成 {selectedStyle} 风格的访谈稿...</Text>
+              <div style={{ 
+                maxHeight: '400px', 
+                overflowY: 'auto',
+                fontSize: '14px',
+                lineHeight: '1.5'
+              }}>
+                <ReactMarkdown>
+                  {resultState.streamingFinal.content}
+                </ReactMarkdown>
+              </div>
+            </Card>
+          )}
+
+          {/* 最终稿内容 */}
+          {resultState.finalScripts[selectedStyle] && !resultState.streamingFinal && (
+            <Card withBorder padding="md" mb="md">
+              <Group position="apart" mb="md">
+                <Text weight={600}>最终访谈稿（{selectedStyle} 风格）</Text>
+                <Group spacing="xs">
+                  <Text size="xs" color="dimmed">
+                    {resultState.finalScripts[selectedStyle].wordCount} 字
+                  </Text>
+                </Group>
+              </Group>
+              
+              <div style={{ 
+                maxHeight: '500px', 
+                overflowY: 'auto', 
+                border: '1px solid #eee', 
+                borderRadius: '8px', 
+                padding: '16px',
+                backgroundColor: '#fafafa'
+              }}>
+                <ReactMarkdown>
+                  {resultState.finalScripts[selectedStyle].content}
+                </ReactMarkdown>
+              </div>
+            </Card>
+          )}
+        </Card>
+      )}
+
+      {/* 章节预览模态框 */}
+      <Modal
+        opened={previewModalOpen}
+        onClose={handleClosePreview}
+        title={`章节 ${selectedSectionIndex + 1} 预览`}
+        size="lg"
+      >
+        {selectedSectionIndex !== null && resultState.sections[selectedSectionIndex] && (
+          <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
+            <ReactMarkdown>
+              {resultState.sections[selectedSectionIndex]}
+            </ReactMarkdown>
+          </div>
+        )}
+      </Modal>
+      
+      {/* 重置访谈确认模态框 */}
+      <Modal
+        opened={resetConfirmOpen}
+        onClose={() => setResetConfirmOpen(false)}
+        title="确认重置访谈"
+        size="sm"
+      >
+        <Stack spacing="md">
+          <Text>
+            重置访谈将清除所有已生成的内容，包括：
+          </Text>
+          <Text size="sm" color="dimmed" ml="md">
+            • 所有问题和回答记录<br/>
+            • 已生成的提纲和章节<br/>
+            • 访谈稿和初稿<br/>
+            • 内容分析结果
+          </Text>
+          <Text weight={600} color="orange">
+            此操作不可撤销，请确认是否继续？
+          </Text>
+          <Group position="right" mt="md">
+            <Button variant="outline" onClick={() => setResetConfirmOpen(false)}>
+              取消
+            </Button>
+            <Button color="red" onClick={handleResetConfirm}>
+              确认重置
             </Button>
           </Group>
         </Stack>
-      </Card>
-      
+      </Modal>
+
       {/* 操作按钮 */}
-      <Group position="center" mt="xl">
+      <Group position="center" mt="xl" mb="xl">
         <Button 
           variant="outline" 
-          onClick={handleNewInterview}
+          onClick={() => setResetConfirmOpen(true)}
           leftIcon={<IconRefresh size={16} />}
+          color="red"
         >
           开始新访谈
-        </Button>
-        <Button 
-          variant="subtle"
-          onClick={() => window.print()}
-          leftIcon={<IconFile size={16} />}
-        >
-          打印访谈稿
         </Button>
       </Group>
     </div>

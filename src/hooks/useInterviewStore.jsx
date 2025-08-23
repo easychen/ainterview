@@ -62,12 +62,36 @@ export const useInterviewStore = create((set, get) => ({
   
   // 访谈结果状态
   resultState: {
-    interviewScripts: {}, // 多个风格的访谈稿: { style: script }
-    currentStyle: 'default', // 当前选中的风格
-    exportFormat: 'pdf', // markdown | pdf | docx
-    isGenerating: false,
+    // 第一阶段：提纲生成
+    outline: null,                    // 文章提纲
+    isGeneratingOutline: false,       // 正在生成提纲
+    streamingOutline: null,           // 流式生成的提纲内容
+    
+    // 第二阶段：分章节生成
+    sections: {},                     // 已生成的章节内容 {sectionIndex: content}
+    currentSection: 0,                // 当前生成到第几个章节
+    isGeneratingSection: false,       // 正在生成章节
+    streamingSection: null,           // 流式生成的章节内容
+    
+    // 第三阶段：初稿合并
+    draftScript: null,                // 合并后的初稿（原始内容）
+    
+    // 第四阶段：风格润色
+    finalScripts: {},                 // 不同风格的最终稿: { style: script }
+    currentStyle: 'default',          // 当前选中的风格
+    isGeneratingFinal: false,         // 正在生成最终稿
+    streamingFinal: null,             // 流式生成的最终稿
+    
+    // 通用状态
+    exportFormat: 'markdown',
     error: null,
-    streamingScript: null, // 流式生成中的访谈稿内容
+    
+    // 兼容性字段（逐步废弃）
+    isGenerating: false,              // 统一的“正在生成”状态
+    interviewScripts: {},             // 旧的多风格访谈稿结构
+    interviewScript: null,            // 旧的单一访谈稿
+    streamingScript: null,            // 旧的流式访谈稿
+    generationMode: 'outline',        // 默认使用提纲模式
   },
   
   // Actions
@@ -389,6 +413,476 @@ export const useInterviewStore = create((set, get) => ({
     setTimeout(() => get().saveSessionData(), 100);
   },
   
+  // 生成访谈稿提纲
+  generateInterviewOutline: async (style = 'default') => {
+    const { apiState, contentState, sessionState } = get();
+    
+    if (!apiState.isConfigured) {
+      throw new Error('API未配置');
+    }
+    
+    set((state) => ({
+      resultState: { 
+        ...state.resultState, 
+        isGeneratingOutline: true, 
+        error: null,
+        generationMode: 'outline'
+      }
+    }));
+    
+    try {
+      const client = new AIAPIClient(apiState);
+      const sessionData = {
+        context: contentState,
+        questions: sessionState.questions,
+        answers: sessionState.answers
+      };
+      
+      const outline = await client.generateInterviewOutline(sessionData, style);
+      
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingOutline: false,
+          outline: outline.content,
+          currentStyle: style,
+          // 清空之前的章节内容
+          sections: {},
+          currentSection: 0
+        }
+      }));
+      
+      // 自动保存数据
+      get().saveSessionData();
+      
+      return outline;
+    } catch (error) {
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingOutline: false,
+          error: error.message
+        }
+      }));
+      throw error;
+    }
+  },
+
+  // 生成访谈稿提纲（流式）
+  generateInterviewOutlineStream: async (style = 'default', onChunk) => {
+    const { apiState, contentState, sessionState } = get();
+    
+    if (!apiState.isConfigured) {
+      throw new Error('API未配置');
+    }
+    
+    set((state) => ({
+      resultState: { 
+        ...state.resultState, 
+        isGeneratingOutline: true, 
+        error: null,
+        generationMode: 'outline'
+      }
+    }));
+    
+    try {
+      const client = new AIAPIClient(apiState);
+      const sessionData = {
+        context: contentState,
+        questions: sessionState.questions,
+        answers: sessionState.answers
+      };
+      
+      const outline = await client.generateInterviewOutlineStream(
+        sessionData, 
+        style,
+        onChunk
+      );
+      
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingOutline: false,
+          outline: outline.content,
+          currentStyle: style,
+          // 清空之前的章节内容
+          sections: {},
+          currentSection: 0
+        }
+      }));
+      
+      // 自动保存数据
+      get().saveSessionData();
+      
+      return outline;
+    } catch (error) {
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingOutline: false,
+          error: error.message
+        }
+      }));
+      throw error;
+    }
+  },
+
+  // 生成单个章节内容
+  generateSectionContent: async (sectionIndex) => {
+    const { apiState, contentState, sessionState, resultState } = get();
+    
+    if (!apiState.isConfigured || !resultState.outline) {
+      throw new Error('API未配置或提纲未生成');
+    }
+    
+    set((state) => ({
+      resultState: { 
+        ...state.resultState, 
+        isGeneratingSection: true, 
+        currentSection: sectionIndex,
+        error: null
+      }
+    }));
+    
+    try {
+      const client = new AIAPIClient(apiState);
+      const sessionData = {
+        context: contentState,
+        questions: sessionState.questions,
+        answers: sessionState.answers
+      };
+      
+      // 获取前面的内容用于衔接
+      const previousContent = Object.keys(resultState.sections)
+        .filter(key => parseInt(key) < sectionIndex)
+        .sort((a, b) => parseInt(a) - parseInt(b))
+        .map(key => resultState.sections[key])
+        .join('\n\n');
+      
+      const sectionContent = await client.generateSectionContent(
+        sessionData,
+        resultState.outline,
+        sectionIndex,
+        previousContent,
+        resultState.currentStyle
+      );
+      
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingSection: false,
+          sections: {
+            ...state.resultState.sections,
+            [sectionIndex]: sectionContent
+          }
+        }
+      }));
+      
+      // 自动保存数据
+      get().saveSessionData();
+      
+      return sectionContent;
+    } catch (error) {
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingSection: false,
+          error: error.message
+        }
+      }));
+      throw error;
+    }
+  },
+
+  // 生成单个章节内容（流式）
+  generateSectionContentStream: async (sectionIndex, onChunk) => {
+    const { apiState, contentState, sessionState, resultState } = get();
+    
+    if (!apiState.isConfigured || !resultState.outline) {
+      throw new Error('API未配置或提纲未生成');
+    }
+    
+    set((state) => ({
+      resultState: { 
+        ...state.resultState, 
+        isGeneratingSection: true, 
+        currentSection: sectionIndex,
+        streamingSection: { index: sectionIndex, content: '' },
+        error: null
+      }
+    }));
+    
+    try {
+      const client = new AIAPIClient(apiState);
+      const sessionData = {
+        context: contentState,
+        questions: sessionState.questions,
+        answers: sessionState.answers
+      };
+      
+      // 获取前面的内容用于衔接
+      const previousContent = Object.keys(resultState.sections)
+        .filter(key => parseInt(key) < sectionIndex)
+        .sort((a, b) => parseInt(a) - parseInt(b))
+        .map(key => resultState.sections[key])
+        .join('\n\n');
+      
+      let streamingContent = '';
+      
+      const sectionContent = await client.generateSectionContentStream(
+        sessionData,
+        resultState.outline,
+        sectionIndex,
+        previousContent,
+        resultState.currentStyle,
+        (chunk, fullContent) => {
+          streamingContent = fullContent;
+          set((state) => ({
+            resultState: {
+              ...state.resultState,
+              streamingSection: {
+                index: sectionIndex,
+                content: streamingContent
+              }
+            }
+          }));
+          if (onChunk) {
+            onChunk(chunk, fullContent, sectionIndex);
+          }
+        }
+      );
+      
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingSection: false,
+          streamingSection: null,
+          sections: {
+            ...state.resultState.sections,
+            [sectionIndex]: sectionContent
+          }
+        }
+      }));
+      
+      // 自动保存数据
+      get().saveSessionData();
+      
+      return sectionContent;
+    } catch (error) {
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingSection: false,
+          streamingSection: null,
+          error: error.message
+        }
+      }));
+      throw error;
+    }
+  },
+
+  // 批量生成所有章节
+  generateAllSections: async (onProgress) => {
+    const { resultState } = get();
+    
+    if (!resultState.outline || !resultState.outline.outline) {
+      throw new Error('提纲未生成');
+    }
+    
+    const totalSections = resultState.outline.outline.length;
+    
+    for (let i = 0; i < totalSections; i++) {
+      try {
+        await get().generateSectionContent(i);
+        if (onProgress) {
+          onProgress(i + 1, totalSections);
+        }
+      } catch (error) {
+        console.error(`生成第${i + 1}章节时出错:`, error);
+        throw error;
+      }
+    }
+  },
+
+  // 合并所有章节为初稿
+  generateDraftScript: () => {
+    const { resultState } = get();
+    
+    if (!resultState.outline || !resultState.sections) {
+      return null;
+    }
+    
+    const totalSections = resultState.outline.outline?.length || 0;
+    const sectionsArray = [];
+    
+    // 按照顺序收集所有章节
+    for (let i = 0; i < totalSections; i++) {
+      if (resultState.sections[i]) {
+        sectionsArray.push(resultState.sections[i]);
+      }
+    }
+    
+    if (sectionsArray.length === 0) {
+      return null;
+    }
+    
+    // 合并内容
+    const mergedContent = sectionsArray.join('\n\n');
+    const wordCount = mergedContent.split(/\s+/).length;
+    
+    const draftScript = {
+      content: mergedContent,
+      format: 'markdown',
+      wordCount: wordCount,
+      estimatedReadTime: Math.ceil(wordCount / 200),
+      generatedAt: new Date().toISOString(),
+      sectionsCount: sectionsArray.length,
+      totalSections: totalSections,
+      outline: resultState.outline
+    };
+    
+    // 更新到状态中
+    set((state) => ({
+      resultState: {
+        ...state.resultState,
+        draftScript: draftScript
+      }
+    }));
+    
+    // 保存数据
+    get().saveSessionData();
+    
+    return draftScript;
+  },
+
+  // 基于初稿生成最终稿（风格润色）
+  generateFinalScript: async (style = 'default') => {
+    const { apiState, resultState } = get();
+    
+    if (!apiState.isConfigured || !resultState.draftScript) {
+      throw new Error('API未配置或初稿未生成');
+    }
+    
+    set((state) => ({
+      resultState: {
+        ...state.resultState,
+        isGeneratingFinal: true,
+        currentStyle: style,
+        error: null
+      }
+    }));
+    
+    try {
+      const client = new AIAPIClient(apiState);
+      
+      const finalScript = await client.polishDraftWithStyle(
+        resultState.draftScript.content,
+        style
+      );
+      
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingFinal: false,
+          finalScripts: {
+            ...state.resultState.finalScripts,
+            [style]: { ...finalScript, style: style }
+          }
+        }
+      }));
+      
+      // 自动保存数据
+      get().saveSessionData();
+      
+      return finalScript;
+    } catch (error) {
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingFinal: false,
+          error: error.message
+        }
+      }));
+      throw error;
+    }
+  },
+
+  // 基于初稿生成最终稿（流式）
+  generateFinalScriptStream: async (style = 'default', onChunk) => {
+    const { apiState, resultState } = get();
+    
+    if (!apiState.isConfigured || !resultState.draftScript) {
+      throw new Error('API未配置或初稿未生成');
+    }
+    
+    set((state) => ({
+      resultState: {
+        ...state.resultState,
+        isGeneratingFinal: true,
+        currentStyle: style,
+        streamingFinal: { content: '', style: style },
+        error: null
+      }
+    }));
+    
+    try {
+      const client = new AIAPIClient(apiState);
+      
+      let streamingContent = '';
+      
+      const finalScript = await client.polishDraftWithStyleStream(
+        resultState.draftScript.content,
+        style,
+        (chunk, fullContent) => {
+          streamingContent = fullContent;
+          set((state) => ({
+            resultState: {
+              ...state.resultState,
+              streamingFinal: {
+                content: streamingContent,
+                style: style,
+                format: 'markdown',
+                wordCount: streamingContent.split(/\s+/).length,
+                estimatedReadTime: Math.ceil(streamingContent.split(/\s+/).length / 200),
+                generatedAt: new Date().toISOString()
+              }
+            }
+          }));
+          if (onChunk) {
+            onChunk(chunk, fullContent, style);
+          }
+        }
+      );
+      
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingFinal: false,
+          streamingFinal: null,
+          finalScripts: {
+            ...state.resultState.finalScripts,
+            [style]: { ...finalScript, style: style }
+          }
+        }
+      }));
+      
+      // 自动保存数据
+      get().saveSessionData();
+      
+      return finalScript;
+    } catch (error) {
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGeneratingFinal: false,
+          streamingFinal: null,
+          error: error.message
+        }
+      }));
+      throw error;
+    }
+  },
+
   // 切换访谈风格
   switchInterviewStyle: async (style) => {
     const { resultState } = get();
@@ -405,8 +899,30 @@ export const useInterviewStore = create((set, get) => ({
       return resultState.interviewScripts[style];
     }
     
-    // 如果未生成，自动生成该风格的访谈稿
-    return await get().generateInterviewScriptWithStyle(style);
+    // 如果未生成，根据生成模式决定如何生成
+    if (resultState.generationMode === 'outline') {
+      // 分段模式：先生成提纲
+      return await get().generateInterviewOutline(style);
+    } else {
+      // 完整模式：直接生成完整访谈稿
+      return await get().generateInterviewScriptWithStyle(style);
+    }
+  },
+
+  // 切换生成模式
+  switchGenerationMode: (mode) => {
+    set((state) => ({
+      resultState: {
+        ...state.resultState,
+        generationMode: mode,
+        // 切换模式时清空相关状态
+        outline: mode === 'full' ? null : state.resultState.outline,
+        sections: mode === 'full' ? {} : state.resultState.sections,
+        currentSection: 0
+      }
+    }));
+    // 保存数据
+    get().saveSessionData();
   },
 
   // 生成访谈稿（流式，支持风格选择）
@@ -418,7 +934,12 @@ export const useInterviewStore = create((set, get) => ({
     }
     
     set((state) => ({
-      resultState: { ...state.resultState, isGenerating: true, error: null }
+      resultState: { 
+        ...state.resultState, 
+        isGenerating: true, 
+        error: null,
+        generationMode: 'quick'
+      }
     }));
     
     try {
@@ -578,12 +1099,36 @@ export const useInterviewStore = create((set, get) => ({
         streamingQuestion: null,
       },
       resultState: {
-        interviewScripts: {},
+        // 第一阶段：提纲生成
+        outline: null,
+        isGeneratingOutline: false,
+        streamingOutline: null,
+        
+        // 第二阶段：分章节生成
+        sections: {},
+        currentSection: 0,
+        isGeneratingSection: false,
+        streamingSection: null,
+        
+        // 第三阶段：初稿合并
+        draftScript: null,
+        
+        // 第四阶段：风格润色
+        finalScripts: {},
         currentStyle: 'default',
-        exportFormat: 'pdf',
-        isGenerating: false,
+        isGeneratingFinal: false,
+        streamingFinal: null,
+        
+        // 通用状态
+        exportFormat: 'markdown',
         error: null,
+        
+        // 兼容性字段
+        isGenerating: false,
+        interviewScripts: {},
+        interviewScript: null,
         streamingScript: null,
+        generationMode: 'outline',
       }
     }));
   },
@@ -702,14 +1247,55 @@ export const useInterviewStore = create((set, get) => ({
   // 数据持久化方法
   saveSessionData: () => {
     const { interviewState, contentState, sessionState, resultState } = get();
+    
+    // 过滤掉临时的生成状态，只保存核心数据
+    const cleanContentState = {
+      ...contentState,
+      isAnalyzing: false, // 不保存分析状态
+      error: null // 不保存错误状态
+    };
+    
+    const cleanSessionState = {
+      ...sessionState,
+      isGeneratingQuestion: false, // 不保存问题生成状态
+      streamingQuestion: null, // 不保存流式问题内容
+      error: null // 不保存错误状态
+    };
+    
+    const cleanResultState = {
+      ...resultState,
+      // 过滤掉所有临时生成状态
+      isGeneratingOutline: false,
+      streamingOutline: null,
+      isGeneratingSection: false,
+      streamingSection: null,
+      isGeneratingFinal: false,
+      streamingFinal: null,
+      isGenerating: false,
+      streamingScript: null,
+      error: null,
+      // 保留实际生成的内容
+      outline: resultState.outline,
+      sections: resultState.sections,
+      draftScript: resultState.draftScript,
+      finalScripts: resultState.finalScripts,
+      interviewScripts: resultState.interviewScripts,
+      interviewScript: resultState.interviewScript,
+      currentStyle: resultState.currentStyle,
+      currentSection: resultState.currentSection,
+      exportFormat: resultState.exportFormat,
+      generationMode: resultState.generationMode
+    };
+    
     // 只保存会话相关数据，不保存API配置（API配置有独立的持久化机制）
     const sessionData = {
       interviewState,
-      contentState,
-      sessionState,
-      resultState,
+      contentState: cleanContentState,
+      sessionState: cleanSessionState,
+      resultState: cleanResultState,
       savedAt: new Date().toISOString()
     };
+    
     try {
       localStorage.setItem('interview_session_data', JSON.stringify(sessionData));
     } catch (error) {
@@ -724,12 +1310,39 @@ export const useInterviewStore = create((set, get) => ({
         const sessionData = JSON.parse(savedData);
         const { interviewState, contentState, sessionState, resultState } = sessionData;
         
+        // 确保临时状态被清理，即使保存的数据中意外包含了这些状态
+        const cleanContentState = {
+          ...contentState,
+          isAnalyzing: false,
+          error: null
+        };
+        
+        const cleanSessionState = {
+          ...sessionState,
+          isGeneratingQuestion: false,
+          streamingQuestion: null,
+          error: null
+        };
+        
+        const cleanResultState = {
+          ...resultState,
+          isGeneratingOutline: false,
+          streamingOutline: null,
+          isGeneratingSection: false,
+          streamingSection: null,
+          isGeneratingFinal: false,
+          streamingFinal: null,
+          isGenerating: false,
+          streamingScript: null,
+          error: null
+        };
+        
         // 恢复会话数据，但不影响API配置状态（API配置有自己的持久化机制）
         set((state) => ({
           interviewState: { ...state.interviewState, ...interviewState },
-          contentState: { ...state.contentState, ...contentState },
-          sessionState: { ...state.sessionState, ...sessionState },
-          resultState: { ...state.resultState, ...resultState }
+          contentState: { ...state.contentState, ...cleanContentState },
+          sessionState: { ...state.sessionState, ...cleanSessionState },
+          resultState: { ...state.resultState, ...cleanResultState }
           // 注意：不更新 apiState
         }));
         
