@@ -1,6 +1,5 @@
 import useAppState from '@/hooks/useAppState'
 import { useNavigate } from 'react-router-dom';
-import useVersion from '@/hooks/useVersion';
 import Header from '@/blocks/header';
 import { Button, Container, Stack, Title, Text, Card, Group } from '@mantine/core';
 import { IconRobot, IconFileText, IconMessages } from '@tabler/icons-react';
@@ -8,14 +7,12 @@ import { IconRobot, IconFileText, IconMessages } from '@tabler/icons-react';
 export default function Home() {
   const state = useAppState();
   const nav = useNavigate();
-  const { version: data, error, isLoading } = useVersion()
   
   return <>
-    <Header />
-    <Container size="lg" py="xl">
+    <Container size="lg" py="xl" mt="xl">
       <Stack spacing="xl" align="center">
         <div style={{ textAlign: 'center' }}>
-          <Title order={1} mb="md">AinterReview</Title>
+          <Title order={1} mb="md">樱桃钨</Title>
           <Text color="dimmed" size="lg">
             AI 驱动的智能访谈工具，帮助独立创作者完成高质量访谈
           </Text>
@@ -57,23 +54,6 @@ export default function Home() {
           </Stack>
         </Card>
         
-        {/* 原有的调试内容，保持兼容性 */}
-        <Card withBorder padding="md" style={{ backgroundColor: '#f8f9fa', maxWidth: 400, width: '100%' }}>
-          <Stack spacing="xs">
-            <Text size="sm" color="dimmed">开发调试信息:</Text>
-            <Text size="xs">{state.name} - <button onClick={state.incName}>+++</button></Text>
-            
-            <div>
-              <button className="my-5" onClick={() => nav('/')}>go back</button>
-            </div>
-            
-            <div className="border p-5">
-              {error && <div>error</div>}
-              {isLoading && <div>loading</div>}
-              {data && <div style={{ fontSize: '10px', overflow: 'hidden' }}>{JSON.stringify(data)}</div>}
-            </div>
-          </Stack>
-        </Card>
       </Stack>
     </Container>
   </>

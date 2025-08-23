@@ -146,12 +146,12 @@ export function InterviewWorkspace() {
   };
   
   return (
-    <Container size="xl" py="xl">
+    <Container size="xl" py="xl" >
       <Stack spacing="xl">
         {/* 页面标题 */}
         <div>
           <Text size="xl" weight={700} mb="xs">
-            AinterView
+            🍒 樱桃钨
           </Text>
           <Text color="dimmed">
             AI 驱动的智能访谈工具，帮助独立创作者完成高质量访谈
@@ -159,7 +159,7 @@ export function InterviewWorkspace() {
         </div>
         
         {/* 步骤指示器 */}
-        <Paper withBorder padding="md">
+        <Paper padding="md">
           <Stepper 
             active={currentStepIndex} 
             onStepClick={handleStepChange}
@@ -254,13 +254,13 @@ export function InterviewWorkspace() {
         </Paper>
         
         {/* 底部帮助信息 */}
-        <Paper withBorder padding="sm" style={{ backgroundColor: '#f8f9fa' }}>
+        {/* <Paper withBorder padding="sm" style={{ backgroundColor: '#f8f9fa' }}>
           <Group position="center">
             <Text size="xs" color="dimmed" align="center">
               使用提示: 依次完成 API 配置 → 内容准备 → 进行访谈 → 生成访谈稿
             </Text>
           </Group>
-        </Paper>
+        </Paper> */}
       </Stack>
     </Container>
   );
