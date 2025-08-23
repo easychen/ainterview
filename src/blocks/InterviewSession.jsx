@@ -25,9 +25,13 @@ import {
   IconAlertCircle,
   IconCheck,
   IconClock,
-  IconBulb
+  IconBulb,
+  IconMicrophone,
+  IconMicrophoneOff
 } from '@tabler/icons-react';
 import { useInterviewStore } from '../hooks/useInterviewStore.jsx';
+import { useAPISpeechRecognition } from '../hooks/useAPISpeechRecognition.jsx';
+import { APIConfigManager } from '../../lib/apiConfig.js';
 
 export function InterviewSession() {
   const { 
@@ -43,6 +47,38 @@ export function InterviewSession() {
   
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [isAnswering, setIsAnswering] = useState(false);
+  
+  // API语音识别功能
+  const {
+    isListening,
+    transcript,
+    error: speechError,
+    isProcessing,
+    isAvailable: speechAvailable,
+    currentLang,
+    startListening,
+    stopListening,
+    clearTranscript,
+    clearError: clearSpeechError,
+    switchLanguage,
+    forceStop
+  } = useAPISpeechRecognition();
+  
+  // 检查是否应该显示语音按钮
+  const shouldShowSpeechButton = speechAvailable;
+  
+  // 当语音识别结束时，将结果添加到输入框
+  useEffect(() => {
+    if (transcript && !isListening) {
+      // 将语音识别结果添加到当前答案
+      setCurrentAnswer(prev => {
+        // 如果已有内容，在后面添加空格
+        const separator = prev.trim() ? ' ' : '';
+        return prev + separator + transcript;
+      });
+      clearTranscript();
+    }
+  }, [transcript, isListening, clearTranscript]);
   
   const currentQuestion = sessionState.questions[sessionState.currentQuestionIndex];
   const totalQuestions = sessionState.questions.length;
@@ -134,6 +170,27 @@ export function InterviewSession() {
     }
   }, [answeredQuestions, sessionState.isComplete]);
   
+  // 语音输入：按下开始录音，抬起停止录音
+  const handleVoiceMouseDown = () => {
+    if (!isListening && !isProcessing) {
+      clearSpeechError();
+      startListening();
+    }
+  };
+  
+  const handleVoiceMouseUp = () => {
+    if (isListening) {
+      stopListening();
+    }
+  };
+  
+  // 防止鼠标离开按钮区域时丢失mouseup事件
+  const handleVoiceMouseLeave = () => {
+    if (isListening) {
+      stopListening();
+    }
+  };
+
   // 重新生成当前问题
   const handleRegenerateQuestion = async () => {
     try {
@@ -273,14 +330,97 @@ export function InterviewSession() {
             {/* 只有在问题生成完成且不是流式生成中时才显示回答框 */}
             {currentQuestion && !sessionState.streamingQuestion && (
               <>
-                <Textarea
-                  placeholder="请输入您的回答..."
-                  value={currentAnswer}
-                  onChange={(e) => setCurrentAnswer(e.target.value)}
-                  minRows={4}
-                  maxRows={8}
-                  autosize
-                />
+                {/* 语音错误提示 */}
+                {speechError && (
+                  <Alert color="red" variant="light" mb="sm" onClose={clearSpeechError}>
+                    <Group position="apart">
+                      <Text size="sm">{speechError}</Text>
+                      {speechError.includes('语言不支持') && (
+                        <Button size="xs" variant="subtle" onClick={() => switchLanguage('en-US')}>
+                          切换为英文
+                        </Button>
+                      )}
+                    </Group>
+                  </Alert>
+                )}
+                
+                {/* 语音识别状态提示 */}
+                {isListening && (
+                  <Alert color="blue" variant="light" mb="sm">
+                    <Group spacing="xs">
+                      <IconMicrophone size={16} />
+                      <div style={{ flex: 1 }}>
+                        <Text size="sm">
+                          正在录音中，请说话...（中文模式）
+                        </Text>
+                        {transcript && (
+                          <Text size="xs" color="dimmed" mt="xs">实时识别：{transcript}</Text>
+                        )}
+                      </div>
+                    </Group>
+                  </Alert>
+                )}
+                
+                {/* 语音处理状态提示 */}
+                {isProcessing && (
+                  <Alert color="yellow" variant="light" mb="sm">
+                    <Group spacing="xs">
+                      <IconClock size={16} />
+                      <Text size="sm">正在处理语音识别，请稍候...</Text>
+                    </Group>
+                  </Alert>
+                )}
+                
+                <div style={{ position: 'relative' }}>
+                  <Textarea
+                    placeholder="请输入您的回答..."
+                    value={currentAnswer}
+                    onChange={(e) => setCurrentAnswer(e.target.value)}
+                    minRows={4}
+                    maxRows={8}
+                    autosize
+                    rightSection={
+                      shouldShowSpeechButton ? (
+                        <Tooltip label={isListening ? '松开停止录音' : '长按开始录音'}>
+                          <ActionIcon
+                            size="lg"
+                            color={isListening ? 'red' : 'blue'}
+                            variant={isListening ? 'filled' : 'light'}
+                            onMouseDown={handleVoiceMouseDown}
+                            onMouseUp={handleVoiceMouseUp}
+                            onMouseLeave={handleVoiceMouseLeave}
+                            style={{
+                              position: 'absolute',
+                              right: '12px',
+                              top: '12px',
+                              zIndex: 1,
+                              cursor: 'pointer',
+                              userSelect: 'none'
+                            }}
+                          >
+                            {isListening ? (
+                              <IconMicrophoneOff size={18} />
+                            ) : (
+                              <IconMicrophone size={18} />
+                            )}
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null
+                    }
+                    rightSectionWidth={shouldShowSpeechButton ? 60 : 0}
+                  />
+                  
+                  {/* 语音相关提示 */}
+                  {!shouldShowSpeechButton ? (
+                    <Text size="xs" color="dimmed" mt="xs">
+                      要使用语音功能，请在 API 配置中启用并配置语音识别 API
+                    </Text>
+                  ) : (
+                    <Text size="xs" color="dimmed" mt="xs">
+                      语音识别语言：中文 | 长按麦克风按钮开始录音，松开停止
+                    </Text>
+                  )}
+                </div>
                 
                 <Group position="apart">
                   <Group>

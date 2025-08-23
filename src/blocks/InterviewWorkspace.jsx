@@ -27,6 +27,8 @@ export function InterviewWorkspace() {
   const { 
     interviewState, 
     apiState,
+    contentState,
+    sessionState,
     loadApiConfig,
     loadSessionData,
     updateInterviewState,
@@ -108,9 +110,9 @@ export function InterviewWorkspace() {
   const currentStepConfig = steps[currentStepIndex];
   const CurrentComponent = currentStepConfig?.component;
   
-  // 手动切换步骤（仅在某些条件下允许）
+  // 手动切换步骤（增强版本，支持更多条件切换）
   const handleStepChange = (stepIndex) => {
-    console.log('警告：handleStepChange 被调用，目标步骤索引:', stepIndex);
+    console.log('handleStepChange 被调用，目标步骤索引:', stepIndex);
     const step = steps[stepIndex];
     if (!step) return;
     
@@ -121,8 +123,14 @@ export function InterviewWorkspace() {
     } else if (stepIndex === 1 && apiState.isConfigured) {
       // 只有在API配置完成后才能进入内容准备
       updateInterviewState({ currentStep: 'content-input' });
+    } else if (stepIndex === 2 && apiState.isConfigured && contentState.analysisResult) {
+      // 只有在API配置完成且内容已分析后才能进入访谈
+      updateInterviewState({ currentStep: 'interviewing' });
+    } else if (stepIndex === 3 && sessionState.questions.length > 0 && Object.keys(sessionState.answers).length >= 3) {
+      // 只有在有问题且已回答至少3个问题后才能查看结果
+      updateInterviewState({ currentStep: 'completed' });
     }
-    // 其他步骤不允许手动跳转
+    // 其他情况不允许跳转，可以添加提示
   };
   
   // 重置配置
@@ -154,19 +162,40 @@ export function InterviewWorkspace() {
         <Paper withBorder padding="md">
           <Stepper 
             active={currentStepIndex} 
-            // onStepClick={handleStepChange} // 暂时禁用点击事件
+            onStepClick={handleStepChange}
             breakpoint="sm"
             allowNextStepsSelect={false}
           >
-            {steps.map((step, index) => (
-              <Stepper.Step
-                key={step.value}
-                label={step.label}
-                description={step.description}
-                icon={<step.icon size={18} />}
-                allowStepSelect={false} // 禁用所有步骤点击
-              />
-            ))}
+            {steps.map((step, index) => {
+              // 动态计算每个步骤是否可选择
+              let allowStepSelect = false;
+              if (index === 0) {
+                // API配置步骤总是可选择的
+                allowStepSelect = true;
+              } else if (index === 1 && apiState.isConfigured) {
+                // 内容准备步骤在API配置完成后可选择
+                allowStepSelect = true;
+              } else if (index === 2 && apiState.isConfigured && contentState.analysisResult) {
+                // 访谈步骤在内容分析完成后可选择
+                allowStepSelect = true;
+              } else if (index === 3 && sessionState.questions.length > 0 && Object.keys(sessionState.answers).length >= 3) {
+                // 结果步骤在有足够的问答后可选择
+                allowStepSelect = true;
+              }
+              
+              return (
+                <Stepper.Step
+                  key={step.value}
+                  label={step.label}
+                  description={step.description}
+                  icon={<step.icon size={18} />}
+                  allowStepSelect={allowStepSelect}
+                  style={{
+                    cursor: allowStepSelect ? 'pointer' : 'default'
+                  }}
+                />
+              );
+            })}
           </Stepper>
         </Paper>
         
