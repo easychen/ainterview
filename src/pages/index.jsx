@@ -19,10 +19,9 @@ export default function Home() {
         
         <Card shadow="sm" padding="xl" radius="md" withBorder style={{ maxWidth: 600, width: '100%' }}>
           <Stack spacing="md">
-            <Group position="center">
-              <IconRobot size={32} color="blue" />
-              <Title order={2}>AI 访谈工具</Title>
-            </Group>
+            <Stack spacing="md" align="center">
+              <div><img src="/logo.png" alt="Logo" width={256} /></div>
+            </Stack>
             
             <Text align="center" color="dimmed">
               通过 AI 自动分析内容并生成有深度的访谈问题，让创作者专注于分享独特见解
