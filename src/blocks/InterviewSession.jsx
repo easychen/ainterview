@@ -296,6 +296,11 @@ export function InterviewSession() {
                       {currentQuestion.category}
                     </Badge>
                   )}
+                  {currentQuestion?.isFromPreview && (
+                    <Badge color="green" variant="light" size="sm">
+                      ⭐ 预设精选
+                    </Badge>
+                  )}
                   {currentQuestion?.isFollowUp && (
                     <Badge color="orange" variant="light" size="sm">
                       追问

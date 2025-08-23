@@ -127,8 +127,10 @@ export function InterviewResult() {
   // 第三步：合并初稿
   const handleGenerateDraft = () => {
     try {
+      console.log('开始合并初稿，当前步骤：', currentStep);
       const draft = generateDraftScript();
       if (draft) {
+        console.log('初稿生成成功，切换到润色步骤');
         setCurrentStep(4);
       }
     } catch (error) {
@@ -161,6 +163,76 @@ export function InterviewResult() {
     } catch (error) {
       console.error('Failed to generate quick script:', error);
     }
+  };
+  
+  // 导出访谈稿
+  const handleExportInterviewScript = (format = 'markdown') => {
+    let content = '';
+    let filename = '';
+    
+    // 根据模式获取内容
+    if (activeMode === 'quick' && resultState.interviewScripts[selectedStyle]) {
+      content = resultState.interviewScripts[selectedStyle].content;
+      filename = `访谈稿_${selectedStyle}风格_${new Date().toISOString().split('T')[0]}.md`;
+    } else if (activeMode === 'outline' && resultState.finalScripts[selectedStyle]) {
+      content = resultState.finalScripts[selectedStyle].content;
+      filename = `访谈稿_${selectedStyle}风格_${new Date().toISOString().split('T')[0]}.md`;
+    } else {
+      alert('请先生成访谈稿');
+      return;
+    }
+    
+    // 创建下载链接
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+  
+  // 导出原始问答记录
+  const handleExportRawQA = () => {
+    if (!sessionState.questions || sessionState.questions.length === 0) {
+      alert('没有问答记录可导出');
+      return;
+    }
+    
+    // 构建原始问答内容
+    let content = `# 访谈问答记录\n\n`;
+    content += `生成时间：${new Date().toLocaleString()}\n`;
+    content += `问题数量：${sessionState.questions.length}\n`;
+    content += `已回答：${Object.keys(sessionState.answers).length}\n\n`;
+    content += `---\n\n`;
+    
+    sessionState.questions.forEach((question, index) => {
+      const answer = sessionState.answers[question.id];
+      content += `## 问题 ${index + 1}\n\n`;
+      content += `**问题：** ${question.content}\n\n`;
+      if (question.category) {
+        content += `**分类：** ${question.category}\n\n`;
+      }
+      content += `**回答：** ${answer ? answer.content : '（未回答）'}\n\n`;
+      if (answer && answer.timestamp) {
+        content += `**回答时间：** ${new Date(answer.timestamp).toLocaleString()}\n\n`;
+      }
+      content += `---\n\n`;
+    });
+    
+    // 创建下载链接
+    const filename = `访谈问答记录_${new Date().toISOString().split('T')[0]}.txt`;
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
   
   // 切换生成模式
@@ -393,42 +465,65 @@ export function InterviewResult() {
           </Group>
           
           {/* 快速模式风格选择器 */}
-          <Card withBorder padding="sm" mb="md" style={{ backgroundColor: '#f8f9fa' }}>
-            <Title order={5} mb="sm">选择写作风格</Title>
-            <Group spacing="xs" mb="xs">
-              {styleOptions.map((style) => (
+          <Card withBorder padding="md" style={{ backgroundColor: '#f8f9fa' }}>
+            <Group position="apart" align="flex-start">
+              <div style={{ flex: 1 }}>
+                <Title order={5} mb="sm">选择写作风格</Title>
+                <Text size="sm" color="dimmed" mb="md">
+                  直接对问答记录进行风格润色（快速模式）
+                </Text>
+                
+                {/* 风格选择器 */}
+                <Group spacing="xs" mb="md">
+                  {styleOptions.map((style) => (
+                    <Button
+                      key={style.value}
+                      variant={selectedStyle === style.value ? 'filled' : 'light'}
+                      size="sm"
+                      onClick={() => setSelectedStyle(style.value)}
+                    >
+                      {style.label}
+                    </Button>
+                  ))}
+                </Group>
+                
+                <Text size="xs" color="dimmed" mb="md">
+                  当前风格：{styleOptions.find(s => s.value === selectedStyle)?.description || '默认风格'}
+                </Text>
+              </div>
+              
+              {/* 生成按钮 */}
+              <div style={{ minWidth: '140px' }}>
                 <Button
-                  key={style.value}
-                  variant={selectedStyle === style.value ? 'filled' : 'light'}
-                  size="sm"
-                  onClick={() => setSelectedStyle(style.value)}
+                  size="md"
+                  onClick={() => handleQuickGenerate(selectedStyle)}
+                  loading={resultState.isGenerating}
+                  leftIcon={<IconBolt size={16} />}
+                  disabled={Object.keys(sessionState.answers || {}).length < 5}
+                  style={{ width: '100%' }}
                 >
-                  {style.label}
+                  生成访谈稿
                 </Button>
-              ))}
+                
+                {Object.keys(sessionState.answers || {}).length < 5 && (
+                  <Text size="xs" color="dimmed" align="center" mt="xs">
+                    至少需要5个问题后才能生成
+                  </Text>
+                )}
+                
+                {resultState.interviewScripts[selectedStyle] && (
+                  <Button
+                    size="sm"
+                    variant="light"
+                    onClick={() => handleQuickGenerate(selectedStyle)}
+                    leftIcon={<IconRefresh size={14} />}
+                    style={{ width: '100%', marginTop: '8px' }}
+                  >
+                    重新生成
+                  </Button>
+                )}
+              </div>
             </Group>
-            <Text size="xs" color="dimmed" mb="md">
-              当前风格：{styleOptions.find(s => s.value === selectedStyle)?.description || '默认风格'}
-            </Text>
-            
-            {/* 生成按钮 */}
-            <Group position="center">
-              <Button
-                size="md"
-                onClick={() => handleQuickGenerate(selectedStyle)}
-                loading={resultState.isGenerating}
-                leftIcon={<IconBolt size={16} />}
-                disabled={Object.keys(sessionState.answers || {}).length < 5}
-              >
-                生成访谈稿
-              </Button>
-            </Group>
-            
-            {Object.keys(sessionState.answers || {}).length < 5 && (
-              <Text size="xs" color="dimmed" align="center" mt="xs">
-                至少需要5个问题后才能生成访谈稿
-              </Text>
-            )}
           </Card>
           
           {/* 流式生成的访谈稿 */}
@@ -457,6 +552,23 @@ export function InterviewResult() {
                   <Text size="xs" color="dimmed">
                     {resultState.interviewScripts[selectedStyle].wordCount} 字
                   </Text>
+                  {/* 导出按钮 */}
+                  <Button
+                    size="xs"
+                    variant="light"
+                    leftIcon={<IconDownload size={12} />}
+                    onClick={() => handleExportInterviewScript('markdown')}
+                  >
+                    导出Markdown
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="light"
+                    leftIcon={<IconFileText size={12} />}
+                    onClick={() => handleExportRawQA()}
+                  >
+                    导出原始问答
+                  </Button>
                 </Group>
               </Group>
               
@@ -744,9 +856,9 @@ export function InterviewResult() {
                 size="sm"
                 onClick={handleGenerateDraft}
                 leftIcon={<IconFile size={14} />}
-                disabled={!!resultState.draftScript}
+                variant={resultState.draftScript ? 'light' : 'filled'}
               >
-                {resultState.draftScript ? '初稿已生成' : '合并为初稿'}
+                {resultState.draftScript ? '重新合并初稿' : '合并为初稿'}
               </Button>
             </Group>
           </Group>
@@ -790,26 +902,60 @@ export function InterviewResult() {
               )}
             </Group>
           </Group>
-
-          {/* 风格选择器 */}
-          <Card withBorder padding="sm" mb="md" style={{ backgroundColor: '#f8f9fa' }}>
-            <Title order={5} mb="sm">选择写作风格</Title>
-            <Group spacing="xs" mb="xs">
-              {styleOptions.map((style) => (
+          
+          {/* 主操作区域 */}
+          <Card withBorder padding="md" mb="md" style={{ backgroundColor: '#f8f9fa' }}>
+            <Group position="apart" align="flex-start" mb="md">
+              <div style={{ flex: 1 }}>
+                <Title order={5} mb="sm">选择写作风格</Title>
+                <Text size="sm" color="dimmed" mb="md">
+                  基于 {resultState.draftScript.wordCount} 字的初稿进行风格润色
+                </Text>
+                
+                {/* 风格选择器 */}
+                <Group spacing="xs" mb="md">
+                  {styleOptions.map((style) => (
+                    <Button
+                      key={style.value}
+                      variant={selectedStyle === style.value ? 'filled' : 'light'}
+                      size="sm"
+                      onClick={() => setSelectedStyle(style.value)}
+                    >
+                      {style.label}
+                    </Button>
+                  ))}
+                </Group>
+                
+                <Text size="xs" color="dimmed" mb="md">
+                  当前风格：{styleOptions.find(s => s.value === selectedStyle)?.description || '默认风格'}
+                </Text>
+              </div>
+              
+              {/* 生成按钮 */}
+              <div style={{ minWidth: '140px' }}>
                 <Button
-                  key={style.value}
-                  variant={selectedStyle === style.value ? 'filled' : 'light'}
-                  size="sm"
-                  onClick={() => handleGenerateFinal(style.value)}
-                  loading={resultState.isGeneratingFinal && selectedStyle === style.value}
+                  size="md"
+                  onClick={() => handleGenerateFinal(selectedStyle)}
+                  loading={resultState.isGeneratingFinal}
+                  leftIcon={<IconBolt size={16} />}
+                  style={{ width: '100%' }}
                 >
-                  {style.label}
+                  生成访谈稿
                 </Button>
-              ))}
+                
+                {resultState.finalScripts[selectedStyle] && (
+                  <Button
+                    size="sm"
+                    variant="light"
+                    onClick={() => handleGenerateFinal(selectedStyle)}
+                    leftIcon={<IconRefresh size={14} />}
+                    style={{ width: '100%', marginTop: '8px' }}
+                  >
+                    重新生成
+                  </Button>
+                )}
+              </div>
             </Group>
-            <Text size="xs" color="dimmed">
-              当前风格：{styleOptions.find(s => s.value === selectedStyle)?.description || '默认风格'}
-            </Text>
           </Card>
 
           {/* 流式生成的最终稿 */}
@@ -838,6 +984,23 @@ export function InterviewResult() {
                   <Text size="xs" color="dimmed">
                     {resultState.finalScripts[selectedStyle].wordCount} 字
                   </Text>
+                  {/* 导出按钮 */}
+                  <Button
+                    size="xs"
+                    variant="light"
+                    leftIcon={<IconDownload size={12} />}
+                    onClick={() => handleExportInterviewScript('markdown')}
+                  >
+                    导出Markdown
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="light"
+                    leftIcon={<IconFileText size={12} />}
+                    onClick={() => handleExportRawQA()}
+                  >
+                    导出原始问答
+                  </Button>
                 </Group>
               </Group>
               

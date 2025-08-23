@@ -2,6 +2,29 @@ import { create } from 'zustand';
 import { APIConfigManager } from '../../lib/apiConfig.js';
 import { AIAPIClient } from '../../lib/aiClient.js';
 
+// 通用字数统计函数：中文按字符数，英文按单词数
+const countWords = (text) => {
+  if (!text) return 0;
+  // 移除Markdown标记和多余空白
+  const cleanText = text
+    .replace(/#+\s/g, '') // 移除标题标记
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // 移除粗体标记
+    .replace(/\*([^*]+)\*/g, '$1') // 移除斜体标记
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // 移除链接，保留文本
+    .replace(/`([^`]+)`/g, '$1') // 移除代码标记
+    .replace(/\s+/g, ' ') // 合并多个空格
+    .trim();
+  
+  // 分别统计中文字符和英文单词
+  const chineseChars = (cleanText.match(/[\u4e00-\u9fff]/g) || []).length;
+  const englishWords = cleanText
+    .replace(/[\u4e00-\u9fff]/g, '') // 移除中文字符
+    .split(/\s+/)
+    .filter(word => word.length > 0).length;
+  
+  return chineseChars + englishWords;
+};
+
 // 初始化时自动加载保存的配置
 const initializeConfig = () => {
   const config = APIConfigManager.loadConfig();
@@ -45,6 +68,7 @@ export const useInterviewStore = create((set, get) => ({
     analysisResult: null, // AI分析结果
     previewQuestions: [], // 问题预览列表
     questionFeedback: {}, // 问题反馈 {questionIndex: 'good'|'bad'}
+    usedPreviewQuestions: [], // 已使用的预览问题索引列表
     isAnalyzing: false,
     error: null,
   },
@@ -218,6 +242,37 @@ export const useInterviewStore = create((set, get) => ({
     setTimeout(() => get().saveSessionData(), 100);
   },
   
+  // 获取未使用的点赞问题
+  getUnusedGoodQuestions: () => {
+    const { contentState } = get();
+    const goodQuestions = [];
+    
+    contentState.previewQuestions.forEach((question, index) => {
+      // 检查是否被点赞且未被使用
+      if (contentState.questionFeedback[index] === 'good' && 
+          !contentState.usedPreviewQuestions.includes(index)) {
+        goodQuestions.push({
+          ...question,
+          originalIndex: index
+        });
+      }
+    });
+    
+    return goodQuestions;
+  },
+  
+  // 标记问题为已使用
+  markQuestionAsUsed: (questionIndex) => {
+    set((state) => ({
+      contentState: {
+        ...state.contentState,
+        usedPreviewQuestions: [...state.contentState.usedPreviewQuestions, questionIndex]
+      }
+    }));
+    // 保存数据
+    setTimeout(() => get().saveSessionData(), 100);
+  },
+  
   // 添加内容源
   addContentSource: (source) => {
     set((state) => ({
@@ -328,6 +383,45 @@ export const useInterviewStore = create((set, get) => ({
     }));
     
     try {
+      // 检查是否有未使用的点赞问题
+      const unusedGoodQuestions = get().getUnusedGoodQuestions();
+      
+      if (unusedGoodQuestions.length > 0) {
+        // 随机选择一个未使用的点赞问题
+        const randomIndex = Math.floor(Math.random() * unusedGoodQuestions.length);
+        const selectedQuestion = unusedGoodQuestions[randomIndex];
+        
+        const formattedQuestion = {
+          id: `preview_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          content: selectedQuestion.question,
+          category: selectedQuestion.category || '预设问题',
+          intent: selectedQuestion.purpose || '深入了解',
+          tone: '专业引导',
+          timestamp: new Date().toISOString(),
+          isFromPreview: true,
+          previewIndex: selectedQuestion.originalIndex,
+          explanation: `这是您在预览中点赞的问题。${selectedQuestion.purpose ? '目的：' + selectedQuestion.purpose : ''}`
+        };
+        
+        set((state) => ({
+          sessionState: {
+            ...state.sessionState,
+            isGeneratingQuestion: false,
+            questions: [...state.sessionState.questions, formattedQuestion],
+            streamingQuestion: null
+          }
+        }));
+        
+        // 标记该问题为已使用
+        get().markQuestionAsUsed(selectedQuestion.originalIndex);
+        
+        // 自动保存数据
+        get().saveSessionData();
+        
+        return formattedQuestion;
+      }
+      
+      // 如果没有未使用的点赞问题，正常生成问题
       const client = new AIAPIClient(apiState);
       let streamingContent = '';
       
@@ -424,6 +518,10 @@ export const useInterviewStore = create((set, get) => ({
         isComplete: false,
         error: null,
         streamingQuestion: null,
+      },
+      contentState: {
+        ...state.contentState,
+        usedPreviewQuestions: [] // 重置已使用的预览问题记录
       }
     }));
     // 重置后保存数据
@@ -681,6 +779,10 @@ export const useInterviewStore = create((set, get) => ({
         }
       }));
       
+      console.log(`章节 ${sectionIndex + 1} 生成完成：`);
+      console.log(`- 内容长度：${sectionContent.length} 字符`);
+      console.log(`- 内容预览：`, sectionContent.substring(0, 100) + '...');
+      
       // 自动保存数据
       get().saveSessionData();
       
@@ -726,26 +828,41 @@ export const useInterviewStore = create((set, get) => ({
     const { resultState } = get();
     
     if (!resultState.outline || !resultState.sections) {
+      console.log('合并初稿：缺少提纲或章节数据');
       return null;
     }
     
     const totalSections = resultState.outline.outline?.length || 0;
     const sectionsArray = [];
     
+    console.log('合并初稿：开始收集章节数据');
+    console.log('总章节数：', totalSections);
+    console.log('已生成章节：', Object.keys(resultState.sections));
+    
     // 按照顺序收集所有章节
     for (let i = 0; i < totalSections; i++) {
       if (resultState.sections[i]) {
-        sectionsArray.push(resultState.sections[i]);
+        const sectionContent = resultState.sections[i];
+        sectionsArray.push(sectionContent);
+        console.log(`章节 ${i + 1} 长度：${sectionContent.length} 字符`);
+        console.log(`章节 ${i + 1} 内容预览：`, sectionContent.substring(0, 100) + '...');
+      } else {
+        console.log(`章节 ${i + 1} 缺失`);
       }
     }
     
     if (sectionsArray.length === 0) {
+      console.log('合并初稿：没有可用的章节内容');
       return null;
     }
     
     // 合并内容
     const mergedContent = sectionsArray.join('\n\n');
-    const wordCount = mergedContent.split(/\s+/).length;
+    console.log('合并后内容总长度：', mergedContent.length, '字符');
+    console.log('合并后内容预览：', mergedContent.substring(0, 200) + '...');
+    
+    const wordCount = countWords(mergedContent);
+    console.log('字数统计结果：', wordCount, '字');
     
     const draftScript = {
       content: mergedContent,
@@ -757,6 +874,13 @@ export const useInterviewStore = create((set, get) => ({
       totalSections: totalSections,
       outline: resultState.outline
     };
+    
+    console.log('生成的初稿对象：', {
+      contentLength: draftScript.content.length,
+      wordCount: draftScript.wordCount,
+      sectionsCount: draftScript.sectionsCount,
+      totalSections: draftScript.totalSections
+    });
     
     // 更新到状态中
     set((state) => ({
@@ -852,6 +976,7 @@ export const useInterviewStore = create((set, get) => ({
         style,
         (chunk, fullContent) => {
           streamingContent = fullContent;
+          
           set((state) => ({
             resultState: {
               ...state.resultState,
@@ -859,8 +984,8 @@ export const useInterviewStore = create((set, get) => ({
                 content: streamingContent,
                 style: style,
                 format: 'markdown',
-                wordCount: streamingContent.split(/\s+/).length,
-                estimatedReadTime: Math.ceil(streamingContent.split(/\s+/).length / 200),
+                wordCount: countWords(streamingContent),
+                estimatedReadTime: Math.ceil(countWords(streamingContent) / 200),
                 generatedAt: new Date().toISOString()
               }
             }
@@ -1103,6 +1228,8 @@ export const useInterviewStore = create((set, get) => ({
         sources: [],
         analysisResult: null,
         previewQuestions: [],
+        questionFeedback: {},
+        usedPreviewQuestions: [], // 清除已使用的预览问题记录
         isAnalyzing: false,
         error: null,
       },
