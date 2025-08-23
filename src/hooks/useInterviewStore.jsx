@@ -10,10 +10,11 @@ const initializeConfig = () => {
       apiKey: config.apiKey,
       baseUrl: config.baseUrl || 'https://api.siliconflow.cn/v1',
       model: config.model || 'qwen/Qwen2.5-7B-Instruct',
-      isConfigured: config.isValid === true,
+      // 如果配置存在就认为已配置，即使尚未验证
+      isConfigured: true,
       isValidating: false,
       lastValidated: config.lastValidated,
-      error: null,
+      error: config.isValid === false ? '配置需要重新验证' : null,
     };
   }
   return {
@@ -42,6 +43,8 @@ export const useInterviewStore = create((set, get) => ({
   contentState: {
     sources: [], // 网址和文档列表
     analysisResult: null, // AI分析结果
+    previewQuestions: [], // 问题预览列表
+    questionFeedback: {}, // 问题反馈 {questionIndex: 'good'|'bad'}
     isAnalyzing: false,
     error: null,
   },
@@ -59,7 +62,8 @@ export const useInterviewStore = create((set, get) => ({
   
   // 访谈结果状态
   resultState: {
-    interviewScript: null, // 最终访谈稿
+    interviewScripts: {}, // 多个风格的访谈稿: { style: script }
+    currentStyle: 'default', // 当前选中的风格
     exportFormat: 'pdf', // markdown | pdf | docx
     isGenerating: false,
     error: null,
@@ -118,15 +122,17 @@ export const useInterviewStore = create((set, get) => ({
   // 加载已保存的API配置
   loadApiConfig: () => {
     const config = APIConfigManager.loadConfig();
-    if (config && config.isValid) {
+    if (config && config.apiKey) {
       set((state) => ({
         apiState: {
           ...state.apiState,
           apiKey: config.apiKey,
           baseUrl: config.baseUrl,
           model: config.model,
+          // 如果配置存在就认为已配置，即使尚未验证
           isConfigured: true,
-          lastValidated: config.lastValidated
+          lastValidated: config.lastValidated,
+          error: config.isValid === false ? '配置需要重新验证' : null
         }
       }));
       return true;
@@ -155,29 +161,66 @@ export const useInterviewStore = create((set, get) => ({
   },
   
   // 更新访谈流程状态
-  updateInterviewState: (updates) => set((state) => ({
-    interviewState: { ...state.interviewState, ...updates }
+  updateInterviewState: (updates) => {
+    console.log('updateInterviewState 被调用:', updates);
+    
+    set((state) => ({
+      interviewState: { ...state.interviewState, ...updates }
+    }));
+    
+    // 访谈状态变化时保存数据
+    setTimeout(() => get().saveSessionData(), 100);
+    
+    console.log('状态更新完成');
+  },
+
+  // 更新内容状态
+  updateContentState: (updates) => set((state) => ({
+    contentState: { ...state.contentState, ...updates }
   })),
+
+  // 记录问题反馈
+  setQuestionFeedback: (questionIndex, feedback) => {
+    set((state) => ({
+      contentState: {
+        ...state.contentState,
+        questionFeedback: {
+          ...state.contentState.questionFeedback,
+          [questionIndex]: feedback
+        }
+      }
+    }));
+    // 用户反馈时保存数据
+    setTimeout(() => get().saveSessionData(), 100);
+  },
   
   // 添加内容源
-  addContentSource: (source) => set((state) => ({
-    contentState: {
-      ...state.contentState,
-      sources: [...state.contentState.sources, { 
-        ...source, 
-        id: `source_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        addedAt: new Date().toISOString()
-      }]
-    }
-  })),
+  addContentSource: (source) => {
+    set((state) => ({
+      contentState: {
+        ...state.contentState,
+        sources: [...state.contentState.sources, { 
+          ...source, 
+          id: `source_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          addedAt: new Date().toISOString()
+        }]
+      }
+    }));
+    // 用户添加内容源时保存数据
+    setTimeout(() => get().saveSessionData(), 100);
+  },
   
   // 删除内容源
-  removeContentSource: (sourceId) => set((state) => ({
-    contentState: {
-      ...state.contentState,
-      sources: state.contentState.sources.filter(s => s.id !== sourceId)
-    }
-  })),
+  removeContentSource: (sourceId) => {
+    set((state) => ({
+      contentState: {
+        ...state.contentState,
+        sources: state.contentState.sources.filter(s => s.id !== sourceId)
+      }
+    }));
+    // 用户删除内容源时保存数据
+    setTimeout(() => get().saveSessionData(), 100);
+  },
   
   // 分析内容
   analyzeContent: async () => {
@@ -200,12 +243,11 @@ export const useInterviewStore = create((set, get) => ({
           ...state.contentState,
           isAnalyzing: false,
           analysisResult
-        },
-        interviewState: {
-          ...state.interviewState,
-          currentStep: 'interviewing'
         }
       }));
+      
+      // 内容分析完成时保存数据
+      setTimeout(() => get().saveSessionData(), 100);
       
       return analysisResult;
     } catch (error) {
@@ -220,6 +262,35 @@ export const useInterviewStore = create((set, get) => ({
     }
   },
   
+  // 生成问题列表预览
+  generateQuestionListPreview: async () => {
+    const { apiState, contentState } = get();
+    
+    if (!apiState.isConfigured || !contentState.analysisResult) {
+      throw new Error('API未配置或内容未分析');
+    }
+    
+    try {
+      const client = new AIAPIClient(apiState);
+      const questionList = await client.generateQuestionListPreview(contentState);
+      
+      // 保存预览问题到全局状态
+      set((state) => ({
+        contentState: {
+          ...state.contentState,
+          previewQuestions: questionList || []
+        }
+      }));
+      
+      // 自动保存数据
+      setTimeout(() => get().saveSessionData(), 100);
+      
+      return questionList;
+    } catch (error) {
+      throw error;
+    }
+  },
+
   // 生成问题（流式）
   generateQuestionStream: async () => {
     const { apiState, contentState, sessionState } = get();
@@ -303,17 +374,116 @@ export const useInterviewStore = create((set, get) => ({
   })),
   
   // 结束访谈
-  completeInterview: () => set((state) => ({
-    sessionState: {
-      ...state.sessionState,
-      isComplete: true
-    },
-    interviewState: {
-      ...state.interviewState,
-      currentStep: 'completed'
-    }
-  })),
+  completeInterview: () => {
+    set((state) => ({
+      sessionState: {
+        ...state.sessionState,
+        isComplete: true
+      },
+      interviewState: {
+        ...state.interviewState,
+        currentStep: 'completed'
+      }
+    }));
+    // 完成访谈时保存数据
+    setTimeout(() => get().saveSessionData(), 100);
+  },
   
+  // 切换访谈风格
+  switchInterviewStyle: async (style) => {
+    const { resultState } = get();
+    
+    // 如果该风格已生成，直接切换
+    if (resultState.interviewScripts[style]) {
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          currentStyle: style,
+          interviewScript: resultState.interviewScripts[style]
+        }
+      }));
+      return resultState.interviewScripts[style];
+    }
+    
+    // 如果未生成，自动生成该风格的访谈稿
+    return await get().generateInterviewScriptWithStyle(style);
+  },
+
+  // 生成访谈稿（流式，支持风格选择）
+  generateInterviewScriptWithStyle: async (style = 'default') => {
+    const { apiState, contentState, sessionState } = get();
+    
+    if (!apiState.isConfigured) {
+      throw new Error('API未配置');
+    }
+    
+    set((state) => ({
+      resultState: { ...state.resultState, isGenerating: true, error: null }
+    }));
+    
+    try {
+      const client = new AIAPIClient(apiState);
+      const sessionData = {
+        context: contentState,
+        questions: sessionState.questions,
+        answers: sessionState.answers
+      };
+      
+      let streamingContent = '';
+      
+      const script = await client.generateScriptStreamWithStyle(
+        sessionData,
+        style,
+        (chunk, fullContent) => {
+          // 更新流式内容
+          streamingContent = fullContent;
+          set((state) => ({
+            resultState: {
+              ...state.resultState,
+              streamingScript: {
+                content: streamingContent,
+                style: style,
+                format: 'markdown',
+                wordCount: streamingContent.split(/\s+/).length,
+                estimatedReadTime: Math.ceil(streamingContent.split(/\s+/).length / 200),
+                generatedAt: new Date().toISOString()
+              }
+            }
+          }));
+        }
+      );
+      
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGenerating: false,
+          interviewScripts: {
+            ...state.resultState.interviewScripts,
+            [style]: { ...script, style: style }
+          },
+          currentStyle: style,
+          interviewScript: { ...script, style: style }, // 保持兼容性
+          streamingScript: null
+        }
+      }));
+      
+      // 自动保存数据
+      get().saveSessionData();
+      
+      return script;
+    } catch (error) {
+      set((state) => ({
+        resultState: {
+          ...state.resultState,
+          isGenerating: false,
+          error: error.message,
+          streamingScript: null
+        }
+      }));
+      throw error;
+    }
+  },
+
   // 生成访谈稿（流式）
   generateInterviewScriptStream: async () => {
     const { apiState, contentState, sessionState } = get();
@@ -394,6 +564,7 @@ export const useInterviewStore = create((set, get) => ({
       contentState: {
         sources: [],
         analysisResult: null,
+        previewQuestions: [],
         isAnalyzing: false,
         error: null,
       },
@@ -407,7 +578,8 @@ export const useInterviewStore = create((set, get) => ({
         streamingQuestion: null,
       },
       resultState: {
-        interviewScript: null,
+        interviewScripts: {},
+        currentStyle: 'default',
         exportFormat: 'pdf',
         isGenerating: false,
         error: null,
@@ -416,26 +588,29 @@ export const useInterviewStore = create((set, get) => ({
     }));
   },
   
-  // 更新状态的通用方法（自动保存）
+  // 更新状态的通用方法（暂时禁用自动保存）
   updateContentState: (updates) => {
     set((state) => ({
       contentState: { ...state.contentState, ...updates }
     }));
-    get().saveSessionData();
+    // 暂时禁用自动保存
+    // get().saveSessionData();
   },
   
   updateSessionState: (updates) => {
     set((state) => ({
       sessionState: { ...state.sessionState, ...updates }
     }));
-    get().saveSessionData();
+    // 暂时禁用自动保存
+    // get().saveSessionData();
   },
   
   updateResultState: (updates) => {
     set((state) => ({
       resultState: { ...state.resultState, ...updates }
     }));
-    get().saveSessionData();
+    // 暂时禁用自动保存
+    // get().saveSessionData();
   },
 
   // 生成问题（原始方法，保持兼容性）
@@ -527,6 +702,7 @@ export const useInterviewStore = create((set, get) => ({
   // 数据持久化方法
   saveSessionData: () => {
     const { interviewState, contentState, sessionState, resultState } = get();
+    // 只保存会话相关数据，不保存API配置（API配置有独立的持久化机制）
     const sessionData = {
       interviewState,
       contentState,
@@ -548,11 +724,13 @@ export const useInterviewStore = create((set, get) => ({
         const sessionData = JSON.parse(savedData);
         const { interviewState, contentState, sessionState, resultState } = sessionData;
         
+        // 恢复会话数据，但不影响API配置状态（API配置有自己的持久化机制）
         set((state) => ({
           interviewState: { ...state.interviewState, ...interviewState },
           contentState: { ...state.contentState, ...contentState },
           sessionState: { ...state.sessionState, ...sessionState },
           resultState: { ...state.resultState, ...resultState }
+          // 注意：不更新 apiState
         }));
         
         return true;

@@ -48,13 +48,21 @@ export function InterviewSession() {
   const totalQuestions = sessionState.questions.length;
   const answeredQuestions = Object.keys(sessionState.answers).length;
   
-  // 初始化时加载保存的数据并生成第一个问题
+  // 暂时禁用初始化时的数据加载，避免状态冲突
+  // useEffect(() => {
+  //   // 尝试加载保存的数据
+  //   const loaded = loadSessionData();
+  //   
+  //   // 如果没有保存的数据或没有问题，生成第一个问题
+  //   if (!loaded || (sessionState.questions.length === 0 && !sessionState.isGeneratingQuestion)) {
+  //     handleGenerateQuestion();
+  //   }
+  // }, []);
+  
+  // 初始化时生成第一个问题（如果没有）
   useEffect(() => {
-    // 尝试加载保存的数据
-    const loaded = loadSessionData();
-    
-    // 如果没有保存的数据或没有问题，生成第一个问题
-    if (!loaded || (sessionState.questions.length === 0 && !sessionState.isGeneratingQuestion)) {
+    if (sessionState.questions.length === 0 && !sessionState.isGeneratingQuestion) {
+      console.log('InterviewSession: 初始化，生成第一个问题');
       handleGenerateQuestion();
     }
   }, []);
@@ -129,7 +137,7 @@ export function InterviewSession() {
   // 重新生成当前问题
   const handleRegenerateQuestion = async () => {
     try {
-      await generateQuestion();
+      await generateQuestionStream();
     } catch (error) {
       console.error('Failed to regenerate question:', error);
     }

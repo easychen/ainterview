@@ -30,22 +30,35 @@ export function InterviewWorkspace() {
     loadApiConfig,
     loadSessionData,
     updateInterviewState,
+    updateContentState,
     clearApiConfig
   } = useInterviewStore();
   
-  // 初始化时检查API配置和会话数据
+  // 监控状态变化
   useEffect(() => {
-    // 加载会话数据
-    loadSessionData();
+    // console.log('InterviewWorkspace: interviewState 变化:', interviewState);
+  }, [interviewState]);
+  
+  // 组件初始化时加载保存的会话数据
+  useEffect(() => {
+    console.log('InterviewWorkspace: 组件初始化');
     
-    // API配置会在store初始化时自动加载
-    // 根据API配置状态设置当前步骤
-    if (apiState.isConfigured) {
-      updateInterviewState({ currentStep: 'content-input' });
-    } else {
-      updateInterviewState({ currentStep: 'api-config' });
+    // 首先加载API配置
+    const hasApiConfig = loadApiConfig();
+    console.log('API配置加载结果:', hasApiConfig);
+    
+    // 然后加载会话数据
+    const hasSessionData = loadSessionData();
+    console.log('会话数据加载结果:', hasSessionData);
+    
+    // 如果没有保存的数据，设置默认状态
+    if (!hasSessionData) {
+      if (!hasApiConfig) {
+        console.log('设置为 API 配置步骤');
+        updateInterviewState({ currentStep: 'api-config' });
+      }
     }
-  }, [apiState.isConfigured, loadSessionData, updateInterviewState]);
+  }, []); // 只在组件初始化时运行一次
   
   // 获取当前步骤索引
   const getStepIndex = () => {
@@ -97,6 +110,7 @@ export function InterviewWorkspace() {
   
   // 手动切换步骤（仅在某些条件下允许）
   const handleStepChange = (stepIndex) => {
+    console.log('警告：handleStepChange 被调用，目标步骤索引:', stepIndex);
     const step = steps[stepIndex];
     if (!step) return;
     
@@ -113,8 +127,14 @@ export function InterviewWorkspace() {
   
   // 重置配置
   const handleResetConfig = () => {
-    clearApiConfig();
-    updateInterviewState({ currentStep: 'api-config' });
+    console.log('警告：handleResetConfig 被调用！');
+    // 清除内容分析结果，但保留内容源
+    updateContentState({ 
+      analysisResult: null, 
+      error: null 
+    });
+    // 跳回内容准备步骤
+    updateInterviewState({ currentStep: 'content-input' });
   };
   
   return (
@@ -123,10 +143,10 @@ export function InterviewWorkspace() {
         {/* 页面标题 */}
         <div>
           <Text size="xl" weight={700} mb="xs">
-            AI 访谈工具
+            AinterView
           </Text>
           <Text color="dimmed">
-            通过 AI 自动生成深度访谈问题，帮助独立创作者完成高质量访谈
+            AI 驱动的智能访谈工具，帮助独立创作者完成高质量访谈
           </Text>
         </div>
         
@@ -134,7 +154,7 @@ export function InterviewWorkspace() {
         <Paper withBorder padding="md">
           <Stepper 
             active={currentStepIndex} 
-            onStepClick={handleStepChange}
+            // onStepClick={handleStepChange} // 暂时禁用点击事件
             breakpoint="sm"
             allowNextStepsSelect={false}
           >
@@ -144,10 +164,7 @@ export function InterviewWorkspace() {
                 label={step.label}
                 description={step.description}
                 icon={<step.icon size={18} />}
-                allowStepSelect={
-                  index === 0 || // 总是允许回到API配置
-                  (index === 1 && apiState.isConfigured) // API配置完成后可以回到内容准备
-                }
+                allowStepSelect={false} // 禁用所有步骤点击
               />
             ))}
           </Stepper>
@@ -169,13 +186,22 @@ export function InterviewWorkspace() {
           </Group>
           
           <Group spacing="xs">
-            {currentStepIndex > 0 && (
+            {(currentStepIndex === 1 || currentStepIndex === 2) && (
               <Button 
                 variant="subtle" 
                 size="sm" 
                 onClick={handleResetConfig}
               >
-                重新配置
+                重新准备
+              </Button>
+            )}
+            {currentStepIndex === 0 && (
+              <Button 
+                variant="subtle" 
+                size="sm" 
+                onClick={() => clearApiConfig()}
+              >
+                清除配置
               </Button>
             )}
           </Group>

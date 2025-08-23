@@ -27,17 +27,30 @@ import {
   IconAnalyze,
   IconAlertCircle,
   IconCheck,
-  IconListDetails
+  IconListDetails,
+  IconMessageQuestion,
+  IconRefresh,
+  IconSettings,
+  IconThumbUp,
+  IconThumbDown,
+  IconPlayerPlay
 } from '@tabler/icons-react';
 import { useInterviewStore } from '../hooks/useInterviewStore.jsx';
 
 export function ContentInput() {
   const { 
     contentState, 
+    sessionState,
+    interviewState,
+    apiState,
     addContentSource, 
     removeContentSource, 
     analyzeContent,
-    updateInterviewState 
+    generateQuestionListPreview,
+    updateInterviewState,
+    updateContentState,
+    setQuestionFeedback,
+    saveSessionData
   } = useInterviewStore();
   
   const [urlInput, setUrlInput] = useState('');
@@ -45,6 +58,7 @@ export function ContentInput() {
   const [textTitle, setTextTitle] = useState('');
   const [isProcessingUrl, setIsProcessingUrl] = useState(false);
   const [activeTab, setActiveTab] = useState('url');
+  const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
   
   // 添加网址
   const handleAddUrl = async () => {
@@ -96,27 +110,30 @@ export function ContentInput() {
     setTextTitle('');
   };
   
-  // 处理文件上传
-  const handleFileUpload = async (file) => {
-    if (!file) return;
+  // 处理文件上传（支持多选）
+  const handleFileUpload = async (files) => {
+    if (!files || files.length === 0) return;
     
-    try {
-      const text = await file.text();
-      const source = {
-        type: 'document',
-        title: file.name,
-        content: text,
-        metadata: {
-          filename: file.name,
-          size: file.size,
-          type: file.type,
-          addedAt: new Date().toISOString()
-        }
-      };
-      
-      addContentSource(source);
-    } catch (error) {
-      console.error('Failed to read file:', error);
+    // 处理多个文件
+    for (const file of files) {
+      try {
+        const text = await file.text();
+        const source = {
+          type: 'document',
+          title: file.name,
+          content: text,
+          metadata: {
+            filename: file.name,
+            size: file.size,
+            type: file.type,
+            addedAt: new Date().toISOString()
+          }
+        };
+        
+        addContentSource(source);
+      } catch (error) {
+        console.error(`Failed to read file ${file.name}:`, error);
+      }
     }
   };
   
@@ -128,6 +145,52 @@ export function ContentInput() {
       console.error('Content analysis failed:', error);
     }
   };
+  
+  // 生成问题列表预览
+  const handleGeneratePreview = async () => {
+    setIsGeneratingPreview(true);
+    try {
+      await generateQuestionListPreview();
+    } catch (error) {
+      console.error('Failed to generate preview questions:', error);
+    } finally {
+      setIsGeneratingPreview(false);
+    }
+  };
+  
+  // 重新配置 - 清除内容分析结果和问题预览
+  const handleReconfigure = () => {
+    // 清除全局状态中的预览问题
+    updateContentState({ 
+      previewQuestions: [],
+      questionFeedback: {},
+      analysisResult: null,
+      error: null 
+    });
+  };
+  
+  // 处理问题反馈
+  const handleQuestionFeedback = (questionIndex, feedback) => {
+    setQuestionFeedback(questionIndex, feedback);
+  };
+  
+  // 开始访谈
+  const handleStartInterview = () => {
+    console.log('开始访谈按钮被点击');
+    
+    // 更新状态为 interviewing
+    updateInterviewState({ currentStep: 'interviewing' });
+    
+    // 延迟保存数据和滚动
+    setTimeout(() => {
+      // 手动保存数据
+      saveSessionData();
+      // 平滑滚动到页面顶部
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 300); // 增加延迟时间，确保状态完全更新
+  };
+  
+
   
   // 渲染内容源列表
   const renderSourceItem = (source) => (
@@ -175,12 +238,41 @@ export function ContentInput() {
       
       <Stack spacing="md">
         <div>
-          <Title order={2} size="h3" mb="xs">
-            访谈内容准备
-          </Title>
-          <Text color="dimmed" size="sm">
-            添加网址、文档或文本内容，AI将基于这些内容生成有深度的访谈问题
-          </Text>
+          <Group position="apart" align="flex-start">
+            <div>
+              <Title order={2} size="h3" mb="xs">
+                访谈内容准备
+              </Title>
+              <Text color="dimmed" size="sm">
+                添加网址、文档或文本内容，AI将基于这些内容生成有深度的访谈问题
+              </Text>
+            </div>
+            
+            {/* 顶部操作按钮 */}
+            <Group spacing="xs">
+              {contentState.analysisResult && (
+                <Button 
+                  variant="light"
+                  size="sm"
+                  onClick={handleStartAnalysis}
+                  loading={contentState.isAnalyzing}
+                  leftIcon={<IconRefresh size={14} />}
+                >
+                  重新分析
+                </Button>
+              )}
+              {contentState.sources.length > 0 && !contentState.analysisResult && (
+                <Button 
+                  size="sm"
+                  onClick={handleStartAnalysis}
+                  loading={contentState.isAnalyzing}
+                  leftIcon={<IconAnalyze size={16} />}
+                >
+                  开始分析内容
+                </Button>
+              )}
+            </Group>
+          </Group>
         </div>
         
         {contentState.error && (
@@ -268,9 +360,11 @@ export function ContentInput() {
                 accept=".txt,.md,.json,.csv,.log"
                 onChange={handleFileUpload}
                 icon={<IconUpload size={16} />}
+                multiple
+                value={null}
               />
               <Alert color="blue" variant="light" title="支持的文件格式">
-                目前支持纯文本文件，如 .txt、.md、.json、.csv 等格式
+                目前支持纯文本文件，如 .txt、.md、.json、.csv 等格式。支持多文件同时上传。
               </Alert>
             </Stack>
           </Tabs.Panel>
@@ -292,11 +386,21 @@ export function ContentInput() {
         {contentState.analysisResult && (
           <Card withBorder padding="md" style={{ backgroundColor: '#f8f9fa' }}>
             <Stack spacing="sm">
-              <Group>
-                <ThemeIcon color="green" variant="light">
-                  <IconCheck size={16} />
-                </ThemeIcon>
-                <Text weight={500}>内容分析完成</Text>
+              <Group position="apart">
+                <Group>
+                  <ThemeIcon color="green" variant="light">
+                    <IconCheck size={16} />
+                  </ThemeIcon>
+                  <Text weight={500}>内容分析完成</Text>
+                </Group>
+                <Button 
+                  variant="subtle" 
+                  size="xs" 
+                  leftIcon={<IconSettings size={14} />}
+                  onClick={handleReconfigure}
+                >
+                  重新配置
+                </Button>
               </Group>
               
               <Text size="sm" color="dimmed">
@@ -324,43 +428,125 @@ export function ContentInput() {
                   </List>
                 </div>
               )}
+
+            </Stack>
+          </Card>
+        )}
+        
+        {/* 问题预览 */}
+        {contentState.analysisResult && (
+          <Card withBorder padding="md">
+            <Stack spacing="md">
+              <Group position="apart" align="flex-start">
+                <Group>
+                  <ThemeIcon color="blue" variant="light">
+                    <IconMessageQuestion size={16} />
+                  </ThemeIcon>
+                  <Text weight={500}>问题预览</Text>
+                </Group>
+                <Group spacing="xs">
+                  <Button 
+                    size="xs" 
+                    variant="light"
+                    leftIcon={<IconRefresh size={14} />}
+                    onClick={handleGeneratePreview}
+                    loading={isGeneratingPreview}
+                  >
+                    {contentState.previewQuestions.length > 0 ? '重新生成' : '生成预览'}
+                  </Button>
+                </Group>
+              </Group>
               
-              <Badge 
-                color={
-                  contentState.analysisResult.difficulty === 'beginner' ? 'green' :
-                  contentState.analysisResult.difficulty === 'intermediate' ? 'yellow' : 'red'
-                }
-                variant="light"
-              >
-                难度: {
-                  contentState.analysisResult.difficulty === 'beginner' ? '初级' :
-                  contentState.analysisResult.difficulty === 'intermediate' ? '中级' : '高级'
-                }
-              </Badge>
+              {isGeneratingPreview && (
+                <Alert color="blue" variant="light">
+                  AI 正在生成问题预览列表...
+                </Alert>
+              )}
+              
+              {contentState.previewQuestions.length > 0 && (
+                <Card withBorder padding="sm" style={{ backgroundColor: '#f0f7ff' }}>
+                  <Stack spacing="sm">
+                    <Text size="sm" weight={500} color="dimmed">
+                      预览问题列表（按访谈顺序排列）
+                    </Text>
+                    {contentState.previewQuestions.map((q, index) => {
+                      const feedback = contentState.questionFeedback?.[index];
+                      return (
+                        <Card key={index} withBorder padding="xs" style={{ backgroundColor: 'white' }}>
+                          <Group position="apart" align="flex-start" mb="xs">
+                            <Group spacing="xs">
+                              <Badge size="xs" variant="light">
+                                第{q.order || index + 1}问
+                              </Badge>
+                              <Badge size="xs" variant="outline">
+                                {q.category || '一般'}
+                              </Badge>
+                            </Group>
+                            <Group spacing="xs">
+                              <ActionIcon 
+                                size="sm" 
+                                variant={feedback === 'good' ? 'filled' : 'light'}
+                                color={feedback === 'good' ? 'green' : 'gray'}
+                                onClick={() => handleQuestionFeedback(index, 'good')}
+                              >
+                                <IconThumbUp size={14} />
+                              </ActionIcon>
+                              <ActionIcon 
+                                size="sm" 
+                                variant={feedback === 'bad' ? 'filled' : 'light'}
+                                color={feedback === 'bad' ? 'red' : 'gray'}
+                                onClick={() => handleQuestionFeedback(index, 'bad')}
+                              >
+                                <IconThumbDown size={14} />
+                              </ActionIcon>
+                            </Group>
+                          </Group>
+                          <Text size="sm" weight={500} mb="xs">
+                            {q.question}
+                          </Text>
+                          {q.purpose && (
+                            <Text size="xs" color="dimmed">
+                              <strong>目的：</strong>{q.purpose}
+                            </Text>
+                          )}
+                          {feedback && (
+                            <Badge 
+                              size="xs" 
+                              variant="light" 
+                              color={feedback === 'good' ? 'green' : 'red'}
+                              mt="xs"
+                            >
+                              {feedback === 'good' ? '你认为不错' : '你认为不好'}
+                            </Badge>
+                          )}
+                        </Card>
+                      );
+                    })}
+                  </Stack>
+                </Card>
+              )}
+              
+              <Text size="xs" color="dimmed">
+                这是基于您的内容生成的预览问题列表，您可以点击“不错”或“不好”来反馈。实际访谈中的问题会根据对话进展动态调整。
+              </Text>
+              
+              {/* 开始访谈按钮 */}
+              {contentState.previewQuestions.length > 0 && (
+                <Group position="center" mt="md">
+                  <Button 
+                    size="md"
+                    leftIcon={<IconPlayerPlay size={16} />}
+                    onClick={handleStartInterview}
+                  >
+                    开始访谈
+                  </Button>
+                </Group>
+              )}
             </Stack>
           </Card>
         )}
         
         {/* 操作按钮 */}
-        <Group position="right" mt="md">
-          {contentState.sources.length > 0 && !contentState.analysisResult && (
-            <Button 
-              onClick={handleStartAnalysis}
-              loading={contentState.isAnalyzing}
-              leftIcon={<IconAnalyze size={16} />}
-            >
-              开始分析内容
-            </Button>
-          )}
-          
-          {contentState.analysisResult && (
-            <Button 
-              onClick={() => updateInterviewState({ currentStep: 'interviewing' })}
-            >
-              开始访谈
-            </Button>
-          )}
-        </Group>
       </Stack>
     </Card>
   );
