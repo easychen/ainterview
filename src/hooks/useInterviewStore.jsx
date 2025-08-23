@@ -413,6 +413,23 @@ export const useInterviewStore = create((set, get) => ({
     setTimeout(() => get().saveSessionData(), 100);
   },
   
+  // 重置问题列表（仅重置问答部分，保留内容分析结果）
+  resetQuestionList: () => {
+    set((state) => ({
+      sessionState: {
+        questions: [],
+        answers: {},
+        currentQuestionIndex: 0,
+        isGeneratingQuestion: false,
+        isComplete: false,
+        error: null,
+        streamingQuestion: null,
+      }
+    }));
+    // 重置后保存数据
+    setTimeout(() => get().saveSessionData(), 100);
+  },
+  
   // 生成访谈稿提纲
   generateInterviewOutline: async (style = 'default') => {
     const { apiState, contentState, sessionState } = get();
@@ -1131,15 +1148,6 @@ export const useInterviewStore = create((set, get) => ({
         generationMode: 'outline',
       }
     }));
-  },
-  
-  // 更新状态的通用方法（暂时禁用自动保存）
-  updateContentState: (updates) => {
-    set((state) => ({
-      contentState: { ...state.contentState, ...updates }
-    }));
-    // 暂时禁用自动保存
-    // get().saveSessionData();
   },
   
   updateSessionState: (updates) => {

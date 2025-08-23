@@ -33,6 +33,11 @@ export function useAPISpeechRecognition() {
   
   // 检查是否可以使用语音识别
   const isAvailable = useCallback(() => {
+    // 检查浏览器支持
+    if (!AudioRecorder.isSupported()) {
+      return false;
+    }
+    // 检查API配置
     return initializeSpeechClient();
   }, [initializeSpeechClient]);
   
@@ -42,6 +47,12 @@ export function useAPISpeechRecognition() {
       // 清除之前的状态
       setError(null);
       setTranscript('');
+      
+      // 检查浏览器支持
+      if (!AudioRecorder.isSupported()) {
+        setError('您的浏览器不支持语音录制功能，请使用Chrome、Firefox或Safari等现代浏览器');
+        return;
+      }
       
       // 检查配置
       if (!initializeSpeechClient()) {

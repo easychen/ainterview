@@ -1,6 +1,5 @@
 import useAppState from '@/hooks/useAppState'
 import { useNavigate } from 'react-router-dom';
-import Header from '@/blocks/header';
 import { Button, Container, Stack, Title, Text, Card, Group } from '@mantine/core';
 import { IconRobot, IconFileText, IconMessages } from '@tabler/icons-react';
 

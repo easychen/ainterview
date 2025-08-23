@@ -418,7 +418,7 @@ export function ContentInput() {
                 </div>
               )}
               
-              {contentState.analysisResult.suggestedQuestions?.length > 0 && (
+              {/* {contentState.analysisResult.suggestedQuestions?.length > 0 && (
                 <div>
                   <Text size="sm" weight={500} mb="xs">建议的问题方向：</Text>
                   <List size="sm">
@@ -427,7 +427,7 @@ export function ContentInput() {
                     ))}
                   </List>
                 </div>
-              )}
+              )} */}
 
             </Stack>
           </Card>

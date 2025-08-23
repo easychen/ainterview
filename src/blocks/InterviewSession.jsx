@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Card, 
   Stack, 
@@ -129,12 +129,8 @@ export function InterviewSession() {
       
       // 自动生成下一个问题（如果还没有足够的问题）
       if (sessionState.currentQuestionIndex + 1 >= sessionState.questions.length) {
-        // 检查是否应该结束访谈
-        if (answeredQuestions >= 5) { // 可以设置最少问题数
-          // 可以选择结束或继续
-        } else {
-          await handleGenerateQuestion();
-        }
+        // 总是生成下一个问题，不受最小问题数限制
+        await handleGenerateQuestion();
       }
     } catch (error) {
       console.error('Failed to submit answer:', error);
@@ -170,24 +166,17 @@ export function InterviewSession() {
     }
   }, [answeredQuestions, sessionState.isComplete]);
   
-  // 语音输入：按下开始录音，抬起停止录音
-  const handleVoiceMouseDown = () => {
-    if (!isListening && !isProcessing) {
+  // 语音输入：点击切换录音状态
+  const handleVoiceToggle = () => {
+    if (isProcessing) return; // 正在处理时不允许操作
+    
+    if (isListening) {
+      // 当前正在录音，点击停止
+      stopListening();
+    } else {
+      // 当前未录音，点击开始
       clearSpeechError();
       startListening();
-    }
-  };
-  
-  const handleVoiceMouseUp = () => {
-    if (isListening) {
-      stopListening();
-    }
-  };
-  
-  // 防止鼠标离开按钮区域时丢失mouseup事件
-  const handleVoiceMouseLeave = () => {
-    if (isListening) {
-      stopListening();
     }
   };
 
@@ -241,22 +230,39 @@ export function InterviewSession() {
       {/* 访谈进度 */}
       <Card withBorder padding="md" mb="md">
         <Group position="apart" mb="md">
-          <div>
+          <div style={{ flex: 1 }}>
             <Title order={3}>AI 访谈进行中</Title>
             <Text size="sm" color="dimmed">
               已完成 {answeredQuestions} 个问题。
-              {isReadyToComplete ? '已达到最少问题数，可以结束访谈。' : `至少需要 ${minQuestions} 个问题。`}
+              {isReadyToComplete ? '已达到最少问题数，可以结束访谈或继续提问。' : `至少需要 ${minQuestions} 个问题。`}
               {totalQuestions > 0 && `当前第 ${sessionState.currentQuestionIndex + 1} 题`}
             </Text>
           </div>
-          <Badge 
-            color={progress >= 100 ? 'green' : progress >= 60 ? 'yellow' : 'blue'}
-            variant="light"
-            size="lg"
-          >
-            {Math.round(progress)}% 完成
-            {progress >= 100 && ' ✓'}
-          </Badge>
+          
+          <Group spacing="xs">
+            <Badge 
+              color={progress >= 100 ? 'green' : progress >= 60 ? 'yellow' : 'blue'}
+              variant="light"
+              size="lg"
+            >
+              {Math.round(progress)}% 完成
+              {progress >= 100 && ' ✓'}
+            </Badge>
+            
+            {/* 当达到最少问题数时显示操作按钮 */}
+            {isReadyToComplete && (
+              <Group spacing="xs">
+                <Button 
+                  color="green"
+                  size="sm"
+                  onClick={() => updateInterviewState({ currentStep: 'completed' })}
+                  leftIcon={<IconCheck size={14} />}
+                >
+                  生成访谈稿
+                </Button>
+              </Group>
+            )}
+          </Group>
         </Group>
         <Progress value={progress} size="sm" />
       </Card>
@@ -381,14 +387,13 @@ export function InterviewSession() {
                     autosize
                     rightSection={
                       shouldShowSpeechButton ? (
-                        <Tooltip label={isListening ? '松开停止录音' : '长按开始录音'}>
+                        <Tooltip label={isListening ? '点击停止录音' : '点击开始录音'}>
                           <ActionIcon
                             size="lg"
                             color={isListening ? 'red' : 'blue'}
                             variant={isListening ? 'filled' : 'light'}
-                            onMouseDown={handleVoiceMouseDown}
-                            onMouseUp={handleVoiceMouseUp}
-                            onMouseLeave={handleVoiceMouseLeave}
+                            onClick={handleVoiceToggle}
+                            disabled={isProcessing}
                             style={{
                               position: 'absolute',
                               right: '12px',
@@ -413,11 +418,11 @@ export function InterviewSession() {
                   {/* 语音相关提示 */}
                   {!shouldShowSpeechButton ? (
                     <Text size="xs" color="dimmed" mt="xs">
-                      要使用语音功能，请在 API 配置中启用并配置语音识别 API
+                      要使用语音功能，请确保：1) 在 API 配置中启用并配置语音识别 API；2) 使用支持语音录制的现代浏览器；3) 网站运行在安全上下文（HTTPS）中
                     </Text>
                   ) : (
                     <Text size="xs" color="dimmed" mt="xs">
-                      语音识别语言：中文 | 长按麦克风按钮开始录音，松开停止
+                      语音识别语言：中文 | 点击麦克风按钮开始/停止录音
                     </Text>
                   )}
                 </div>
@@ -437,25 +442,6 @@ export function InterviewSession() {
                   </Group>
                   
                   <Group>
-                    {answeredQuestions >= 3 && (
-                      <Button 
-                        variant="outline"
-                        onClick={handleCompleteInterview}
-                        leftIcon={<IconPlayerStop size={16} />}
-                      >
-                        结束访谈
-                      </Button>
-                    )}
-                    {/* 当问答数量达到一定数量时，显示生成访谈稿按钮 */}
-                    {answeredQuestions >= 5 && (
-                      <Button 
-                        color="green"
-                        onClick={() => updateInterviewState({ currentStep: 'completed' })}
-                        leftIcon={<IconCheck size={16} />}
-                      >
-                        生成访谈稿
-                      </Button>
-                    )}
                     <Button 
                       onClick={handleSubmitAnswer}
                       disabled={!currentAnswer.trim() || isAnswering}

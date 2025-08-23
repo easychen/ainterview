@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Container, 
   Stepper, 
@@ -8,7 +8,8 @@ import {
   Stack,
   Paper,
   Center,
-  Alert
+  Alert,
+  Modal
 } from '@mantine/core';
 import { 
   IconSettings, 
@@ -33,8 +34,12 @@ export function InterviewWorkspace() {
     loadSessionData,
     updateInterviewState,
     updateContentState,
-    clearApiConfig
+    clearApiConfig,
+    resetQuestionList
   } = useInterviewStore();
+  
+  // 确认对话框状态
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   
   // 监控状态变化
   useEffect(() => {
@@ -145,6 +150,17 @@ export function InterviewWorkspace() {
     updateInterviewState({ currentStep: 'content-input' });
   };
   
+  // 重新生成问题（显示确认对话框）
+  const handleResetQuestions = () => {
+    setResetConfirmOpen(true);
+  };
+  
+  // 确认重置问题列表
+  const handleResetConfirm = () => {
+    resetQuestionList();
+    setResetConfirmOpen(false);
+  };
+  
   return (
     <Container size="xl" py="xl" >
       <Stack spacing="xl">
@@ -215,13 +231,22 @@ export function InterviewWorkspace() {
           </Group>
           
           <Group spacing="xs">
-            {(currentStepIndex === 1 || currentStepIndex === 2) && (
+            {currentStepIndex === 1 && (
               <Button 
                 variant="subtle" 
                 size="sm" 
                 onClick={handleResetConfig}
               >
                 重新准备
+              </Button>
+            )}
+            {currentStepIndex === 2 && (
+              <Button 
+                variant="subtle" 
+                size="sm" 
+                onClick={handleResetQuestions}
+              >
+                重新生成问题
               </Button>
             )}
             {currentStepIndex === 0 && (
@@ -252,6 +277,36 @@ export function InterviewWorkspace() {
             </Center>
           )}
         </Paper>
+        
+        {/* 重置问题确认对话框 */}
+        <Modal
+          opened={resetConfirmOpen}
+          onClose={() => setResetConfirmOpen(false)}
+          title="确认重新生成问题"
+          size="sm"
+        >
+          <Stack spacing="md">
+            <Text>
+              重新生成问题将清除当前的访谈进度，包括：
+            </Text>
+            <Text size="sm" color="dimmed" ml="md">
+              • 所有已生成的问题<br/>
+              • 所有问题的回答记录<br/>
+              • 当前访谈进度
+            </Text>
+            <Text size="sm" color="orange">
+              内容分析结果将保留，您可以重新开始问答。
+            </Text>
+            <Group position="right" mt="md">
+              <Button variant="outline" onClick={() => setResetConfirmOpen(false)}>
+                取消
+              </Button>
+              <Button color="orange" onClick={handleResetConfirm}>
+                确认重置
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
         
         {/* 底部帮助信息 */}
         {/* <Paper withBorder padding="sm" style={{ backgroundColor: '#f8f9fa' }}>
