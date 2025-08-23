@@ -16,7 +16,8 @@ import {
   IconFileText, 
   IconMessages, 
   IconCheck,
-  IconAlertCircle
+  IconAlertCircle,
+  IconRefresh
 } from '@tabler/icons-react';
 import { useInterviewStore } from '../hooks/useInterviewStore.jsx';
 import { APIConfig } from './APIConfig.jsx';
@@ -35,11 +36,13 @@ export function InterviewWorkspace() {
     updateInterviewState,
     updateContentState,
     clearApiConfig,
-    resetQuestionList
+    resetQuestionList,
+    resetInterview
   } = useInterviewStore();
   
   // 确认对话框状态
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [newInterviewConfirmOpen, setNewInterviewConfirmOpen] = useState(false);
   
   // 监控状态变化
   useEffect(() => {
@@ -108,6 +111,13 @@ export function InterviewWorkspace() {
       description: '查看和导出访谈结果',
       icon: IconCheck,
       component: InterviewResult
+    },
+    {
+      value: 'new-interview',
+      label: '开始新访谈',
+      description: '重置所有数据开始新的访谈',
+      icon: IconRefresh,
+      component: null // 特殊步骤，不渲染组件
     }
   ];
   
@@ -120,6 +130,12 @@ export function InterviewWorkspace() {
     console.log('handleStepChange 被调用，目标步骤索引:', stepIndex);
     const step = steps[stepIndex];
     if (!step) return;
+    
+    // 特殊处理：开始新访谈步骤
+    if (stepIndex === 4) { // 开始新访谈步骤
+      handleNewInterview();
+      return;
+    }
     
     // 检查是否允许切换到该步骤
     if (stepIndex === 0) {
@@ -161,6 +177,17 @@ export function InterviewWorkspace() {
     setResetConfirmOpen(false);
   };
   
+  // 开始新访谈（显示确认对话框）
+  const handleNewInterview = () => {
+    setNewInterviewConfirmOpen(true);
+  };
+  
+  // 确认开始新访谈
+  const handleNewInterviewConfirm = () => {
+    resetInterview();
+    setNewInterviewConfirmOpen(false);
+  };
+  
   return (
     <Container size="xl" py="xl" >
       <Stack spacing="xl">
@@ -197,6 +224,9 @@ export function InterviewWorkspace() {
               } else if (index === 3 && sessionState.questions.length > 0 && Object.keys(sessionState.answers).length >= 3) {
                 // 结果步骤在有足够的问答后可选择
                 allowStepSelect = true;
+              } else if (index === 4) {
+                // 开始新访谈步骤总是可选择的
+                allowStepSelect = true;
               }
               
               return (
@@ -206,6 +236,7 @@ export function InterviewWorkspace() {
                   description={step.description}
                   icon={<step.icon size={18} />}
                   allowStepSelect={allowStepSelect}
+                  color={index === 4 ? 'red' : undefined} // 新访谈步骤使用红色
                   style={{
                     cursor: allowStepSelect ? 'pointer' : 'default'
                   }}
@@ -262,21 +293,23 @@ export function InterviewWorkspace() {
         </Group>
         
         {/* 当前步骤内容 */}
-        <Paper shadow="sm" withBorder>
-          {CurrentComponent ? (
-            <CurrentComponent />
-          ) : (
-            <Center p="xl">
-              <Stack align="center" spacing="md">
-                <IconAlertCircle size={48} color="gray" />
-                <Text color="dimmed">未知的步骤状态</Text>
-                <Button onClick={() => updateInterviewState({ currentStep: 'api-config' })}>
-                  返回首页
-                </Button>
-              </Stack>
-            </Center>
-          )}
-        </Paper>
+        {currentStepIndex < 4 && (
+          <Paper shadow="sm" withBorder>
+            {CurrentComponent ? (
+              <CurrentComponent />
+            ) : (
+              <Center p="xl">
+                <Stack align="center" spacing="md">
+                  <IconAlertCircle size={48} color="gray" />
+                  <Text color="dimmed">未知的步骤状态</Text>
+                  <Button onClick={() => updateInterviewState({ currentStep: 'api-config' })}>
+                    返回首页
+                  </Button>
+                </Stack>
+              </Center>
+            )}
+          </Paper>
+        )}
         
         {/* 重置问题确认对话框 */}
         <Modal
@@ -302,6 +335,37 @@ export function InterviewWorkspace() {
                 取消
               </Button>
               <Button color="orange" onClick={handleResetConfirm}>
+                确认重置
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
+        
+        {/* 开始新访谈确认对话框 */}
+        <Modal
+          opened={newInterviewConfirmOpen}
+          onClose={() => setNewInterviewConfirmOpen(false)}
+          title="确认开始新访谈"
+          size="sm"
+        >
+          <Stack spacing="md">
+            <Text>
+              开始新访谈将清除所有当前数据，包括：
+            </Text>
+            <Text size="sm" color="dimmed" ml="md">
+              • 所有问题和回答记录<br/>
+              • 已生成的访谈稿和初稿<br/>
+              • 内容分析结果<br/>
+              • 访谈进度和状态
+            </Text>
+            <Text weight={600} color="red">
+              此操作不可撤销，请确认是否继续？
+            </Text>
+            <Group position="right" mt="md">
+              <Button variant="outline" onClick={() => setNewInterviewConfirmOpen(false)}>
+                取消
+              </Button>
+              <Button color="red" onClick={handleNewInterviewConfirm}>
                 确认重置
               </Button>
             </Group>
