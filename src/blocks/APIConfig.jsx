@@ -14,7 +14,7 @@ import {
   Switch,
   Divider
 } from '@mantine/core';
-import { IconKey, IconServer, IconCheck, IconAlertCircle, IconMicrophone, IconArrowRight } from '@tabler/icons-react';
+import { IconKey, IconServer, IconCheck, IconAlertCircle, IconMicrophone, IconArrowRight, IconCopy } from '@tabler/icons-react';
 import { useInterviewStore } from '../hooks/useInterviewStore.jsx';
 import { APIConfigManager } from '../../lib/apiConfig.js';
 
@@ -45,6 +45,7 @@ export function APIConfig() {
   
   const [isLoading, setIsLoading] = useState(false);
   const [hasAttemptedValidation, setHasAttemptedValidation] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
   
   // 预设的API服务商
   const apiProviders = [
@@ -137,9 +138,30 @@ export function APIConfig() {
     if (speechConfig) {
       setSpeechForm(speechConfig);
     }
-  }, [updateApiState]);
+  }, [updateApiState, apiState.apiKey, apiState.baseUrl, apiState.model]); // 添加依赖项以响应外部状态变化
   
-  // 当选择API服务商时更新相关配置
+  // 强制刷新表单状态（当外部配置更新时）
+  useEffect(() => {
+    if (apiState.apiKey && (apiState.apiKey !== form.apiKey || apiState.baseUrl !== form.baseUrl || apiState.model !== form.model)) {
+      // 外部状态变化时，同步更新表单
+      setForm({
+        apiKey: apiState.apiKey,
+        baseUrl: apiState.baseUrl,
+        model: apiState.model
+      });
+      setSelectedProvider(apiState.baseUrl);
+      
+      // 检查是否是自定义模型
+      const provider = apiProviders.find(p => p.value === apiState.baseUrl);
+      if (provider && !provider.models.includes(apiState.model)) {
+        setIsCustomModel(true);
+        setCustomModel(apiState.model);
+      } else {
+        setIsCustomModel(false);
+        setCustomModel('');
+      }
+    }
+  }, [apiState.apiKey, apiState.baseUrl, apiState.model]);
   useEffect(() => {
     const provider = apiProviders.find(p => p.value === selectedProvider);
     if (provider) {
@@ -259,12 +281,52 @@ export function APIConfig() {
     }
   };
   
-  // 处理语音配置表单变更
-  const handleSpeechFormChange = (field, value) => {
-    setSpeechForm(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  // 复制当前配置
+  const handleCopyCurrentConfig = async () => {
+    try {
+      if (!form.apiKey.trim()) {
+        updateApiState({ error: '请先配置API密钥才能生成分享链接' });
+        return;
+      }
+      
+      // 保存当前配置到localStorage（确保最新状态）
+      APIConfigManager.saveConfig(form);
+      APIConfigManager.saveSpeechConfig(speechForm);
+      
+      // 生成预设配置字符串
+      const presetString = APIConfigManager.generatePresetConfig();
+      
+      // 生成完整的分享链接
+      const shareUrl = `${window.location.origin}/interview?preset=${encodeURIComponent(presetString)}`;
+      
+      // 复制到剪贴板
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        // 兼容方案
+        const textArea = document.createElement('textarea');
+        textArea.value = shareUrl;
+        textArea.style.position = 'absolute';
+        textArea.style.left = '-999999px';
+        document.body.prepend(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      
+      // 显示成功提示
+      setCopySuccess(true);
+      updateApiState({ error: null });
+      
+      // 3秒后清除成功状态
+      setTimeout(() => {
+        setCopySuccess(false);
+      }, 3000);
+      
+    } catch (error) {
+      console.error('复制配置失败:', error);
+      updateApiState({ error: '复制配置失败: ' + error.message });
+    }
   };
   
   // 语音API服务商选项
@@ -346,6 +408,17 @@ export function APIConfig() {
             variant="light"
           >
             API配置验证通过，可以开始使用访谈工具
+          </Alert>
+        )}
+        
+        {copySuccess && (
+          <Alert 
+            icon={<IconCheck size={16} />} 
+            title="复制成功" 
+            color="blue"
+            variant="light"
+          >
+            配置分享链接已复制到剪贴板，现在可以分享给其他用户了！
           </Alert>
         )}
         
@@ -503,6 +576,15 @@ export function APIConfig() {
             </Button>
             <Button variant="subtle" onClick={handleResetSpeech}>
               重置语音配置
+            </Button>
+            <Button 
+              variant="subtle" 
+              onClick={handleCopyCurrentConfig}
+              disabled={!form.apiKey.trim()}
+              leftIcon={<IconCopy size={16} />}
+              color={copySuccess ? 'green' : 'blue'}
+            >
+              {copySuccess ? '已复制' : '复制当前配置'}
             </Button>
           </Group>
           
