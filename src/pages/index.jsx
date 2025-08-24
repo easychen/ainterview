@@ -1,7 +1,7 @@
 import useAppState from '@/hooks/useAppState'
 import { useNavigate } from 'react-router-dom';
 import { Button, Container, Stack, Title, Text, Card, Group } from '@mantine/core';
-import { IconRobot, IconFileText, IconMessages } from '@tabler/icons-react';
+import { IconRobot, IconFileText, IconMessages, IconGitMerge } from '@tabler/icons-react';
 
 export default function Home() {
   const state = useAppState();
@@ -49,6 +49,27 @@ export default function Home() {
             >
               开始 AI 访谈
             </Button>
+
+            <Group position="center" spacing="md">
+              <Button
+                variant="subtle"
+                component="a"
+                href="https://github.com/easychen/ainterview"
+                target="_blank"
+                leftIcon={<IconGitMerge size={16} />}
+              >
+                源代码
+              </Button>
+              <Button
+                variant="subtle"
+                component="a"
+                href="https://www.bilibili.com/video/BV1wgezzUECm"
+                target="_blank"
+                leftIcon={<IconMessages size={16} />}
+              >
+                背后故事
+              </Button>
+            </Group>
           </Stack>
         </Card>
         
