@@ -57,7 +57,7 @@ export function ContentInput() {
   const [textInput, setTextInput] = useState('');
   const [textTitle, setTextTitle] = useState('');
   const [isProcessingUrl, setIsProcessingUrl] = useState(false);
-  const [activeTab, setActiveTab] = useState('url');
+  const [activeTab, setActiveTab] = useState('text');
   const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
   
   // 添加网址
@@ -288,9 +288,9 @@ export function ContentInput() {
         
         <Tabs value={activeTab} onTabChange={setActiveTab}>
           <Tabs.List>
-            <Tabs.Tab value="url" icon={<IconLink size={14} />}>
+            {/* <Tabs.Tab value="url" icon={<IconLink size={14} />}>
               网址链接
-            </Tabs.Tab>
+            </Tabs.Tab> */}
             <Tabs.Tab value="text" icon={<IconListDetails size={14} />}>
               文本内容
             </Tabs.Tab>
